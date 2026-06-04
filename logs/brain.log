@@ -1,0 +1,45 @@
+2026-04-30 09:57:53 | INFO | brain | --- 初始化机器人大脑 ---
+2026-04-30 09:57:53 | INFO | brain | 退出待机状态
+2026-04-30 09:57:53 | INFO | state_machine | 状态转换: idle -> awake
+2026-04-30 09:57:53 | INFO | brain | 进入唤醒状态 - 语音交互已激活
+2026-04-30 09:57:53 | WARNING | brain | 远程连接被拒绝: 小派正在工作中，请稍后再试
+2026-04-30 09:57:53 | INFO | brain | 退出唤醒状态
+2026-04-30 09:57:53 | INFO | state_machine | 状态转换: awake -> idle
+2026-04-30 09:57:53 | INFO | brain | 进入待机状态
+2026-04-30 09:57:53 | INFO | brain | 退出待机状态
+2026-04-30 09:57:53 | INFO | state_machine | 状态转换: idle -> remote
+2026-04-30 09:57:53 | INFO | brain | 进入远程控制状态 - 唤醒词已屏蔽
+2026-04-30 09:57:53 | WARNING | state_machine | 拒绝转换: remote -> awake
+2026-04-30 09:57:53 | INFO | brain | 退出远程控制状态
+2026-04-30 09:57:53 | INFO | state_machine | 状态转换: remote -> idle
+2026-04-30 09:57:53 | INFO | brain | 进入待机状态
+2026-04-30 10:24:41 | INFO | brain | --- 初始化机器人大脑 ---
+2026-04-30 10:24:41 | INFO | brain | 退出待机状态
+2026-04-30 10:24:41 | INFO | state_machine | 状态转换: idle -> awake
+2026-04-30 10:24:41 | INFO | brain | 进入唤醒状态 - 语音交互已激活
+2026-04-30 10:24:41 | WARNING | brain | 远程连接被拒绝: 小派正在工作中，请稍后再试
+2026-04-30 10:24:41 | INFO | brain | 退出唤醒状态
+2026-04-30 10:24:41 | INFO | state_machine | 状态转换: awake -> idle
+2026-04-30 10:24:41 | INFO | brain | 进入待机状态
+2026-04-30 10:24:41 | INFO | brain | 退出待机状态
+2026-04-30 10:24:41 | INFO | state_machine | 状态转换: idle -> remote
+2026-04-30 10:24:41 | INFO | brain | 进入远程控制状态 - 唤醒词已屏蔽
+2026-04-30 10:24:41 | WARNING | state_machine | 拒绝转换: remote -> awake
+2026-04-30 10:24:41 | INFO | brain | 退出远程控制状态
+2026-04-30 10:24:41 | INFO | state_machine | 状态转换: remote -> idle
+2026-04-30 10:24:41 | INFO | brain | 进入待机状态
+2026-04-30 10:38:53 | INFO | brain | --- 初始化机器人大脑 ---
+2026-04-30 10:38:53 | INFO | brain | 退出待机状态
+2026-04-30 10:38:53 | INFO | state_machine | 状态转换: idle -> awake
+2026-04-30 10:38:53 | INFO | brain | 进入唤醒状态 - 语音交互已激活
+2026-04-30 10:38:53 | WARNING | brain | 远程连接被拒绝: 小派正在工作中，请稍后再试
+2026-04-30 10:38:53 | INFO | brain | 退出唤醒状态
+2026-04-30 10:38:53 | INFO | state_machine | 状态转换: awake -> idle
+2026-04-30 10:38:53 | INFO | brain | 进入待机状态
+2026-04-30 10:38:53 | INFO | brain | 退出待机状态
+2026-04-30 10:38:53 | INFO | state_machine | 状态转换: idle -> remote
+2026-04-30 10:38:53 | INFO | brain | 进入远程控制状态 - 唤醒词已屏蔽
+2026-04-30 10:38:53 | WARNING | state_machine | 拒绝转换: remote -> awake
+2026-04-30 10:38:53 | INFO | brain | 退出远程控制状态
+2026-04-30 10:38:53 | INFO | state_machine | 状态转换: remote -> idle
+2026-04-30 10:38:53 | INFO | brain | 进入待机状态

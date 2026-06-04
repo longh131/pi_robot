@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小派机器人 - 远程控制</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <!-- 登录界面 -->
+    <div class="login-box" id="loginBox">
+        <h2>🔐 用户登录</h2>
+        <div id="loginMessage"></div>
+        <input type="text" id="username" placeholder="用户名" />
+        <input type="password" id="password" placeholder="密码" />
+        <button onclick="login()">🔐 登录</button>
+        <button onclick="checkRobotStatus()" id="btnRefresh" style="display: none;">🔄 刷新状态</button>
+    </div>
+
+    <!-- 控制界面 -->
+    <div class="control-panel" id="controlPanel">
+        <div class="header-bar">
+            <div class="user-info" id="userInfo">当前用户: -</div>
+            <div class="header-status idle" id="headerStatus">⚪ 待机中</div>
+            <button class="header-btn" onclick="logout()" id="btnLogout">🔌 退出登录</button>
+        </div>
+        <div id="message"></div>
+
+        <!-- 主内容区 -->
+        <div class="main-layout" id="mainLayout">
+            <!-- 视频监控 - 第一行第一列 -->
+            <div class="video-section" id="videoSection">
+                <h3>📹 视频监控</h3>
+                <div class="video-container">
+                    <img id="videoFeed" src="" class="video-feed" style="display: none;" />
+                    <div class="video-placeholder" id="videoPlaceholder">
+                        <div class="camera-icon">📷</div>
+                        <div>实时监控画面</div>
+                        <div style="font-size: 12px; margin-top: 5px;">等待摄像头连接...</div>
+                    </div>
+                    <div class="video-overlay" id="videoOverlay">🟢 LIVE</div>
+                </div>
+            </div>
+
+            <!-- 运动控制 - 第一行第二列 -->
+            <div class="control-section-wrapper">
+                <div class="control-section">
+                    <h3>🎮 运动控制</h3>
+                    <div class="control-grid">
+                        <div></div>
+                        <button class="btn-direction" onclick="sendCommand('forward')" id="btn_forward">⬆️ 前进</button>
+                        <div></div>
+                        <button class="btn-direction" onclick="sendCommand('left')" id="btn_left">⬅️ 左转</button>
+                        <button class="btn-stop" onclick="sendCommand('stop')" id="btn_stop">⏹️ 停止</button>
+                        <button class="btn-direction" onclick="sendCommand('right')" id="btn_right">➡️ 右转</button>
+                        <div></div>
+                        <button class="btn-direction" onclick="sendCommand('backward')" id="btn_backward">⬇️ 后退</button>
+                        <div></div>
+                    </div>
+
+                    <!-- 速度控制 -->
+                    <div class="speed-control">
+                        <label for="speedSlider">⚡ 速度调节</label>
+                        <div class="speed-controls-row">
+                            <button class="speed-btn" onclick="speedDown()">➖ 减速</button>
+                            <input type="range" id="speedSlider" class="speed-slider" min="0" max="100" value="20" onchange="setSpeed()">
+                            <div class="speed-value" id="speedValue">20%</div>
+                            <button class="speed-btn" onclick="speedUp()">➕ 加速</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 快捷功能 - 第二行第一列 -->
+            <div class="function-section" id="functionSection">
+                <h3>🎯 快捷功能</h3>
+                <div class="function-grid">
+                    <button class="function-btn btn-record" onclick="toggleRecording()" id="btnRecord">⏺️ 开始录像</button>
+                    <button class="function-btn btn-photo" onclick="takePhoto()" id="btnPhoto">📷 点击拍照</button>
+                    <button class="function-btn btn-music" onclick="playMusic()" id="btnMusic">🎵 自动巡航</button>
+                </div>
+            </div>
+
+            <!-- 媒体文件 - 第二行第二列 -->
+            <div class="media-section" id="mediaSection">
+                <h3>📁 媒体文件</h3>
+                <div class="media-tabs">
+                    <button class="media-tab active" onclick="switchMediaTab('videos')">📹 录像</button>
+                    <button class="media-tab" onclick="switchMediaTab('photos')">🖼️ 照片</button>
+                    <button class="media-tab" onclick="switchMediaTab('music')">🎵 音频</button>
+                </div>
+                <div class="media-list" id="mediaList">
+                    <div class="media-item"><span>暂无文件</span><button>查看</button></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 播放窗口 -->
+        <div class="playback-wrapper" id="playbackWrapper" style="display: none;">
+            <div class="playback-header">
+                <span id="playbackTitle">播放中</span>
+                <button class="playback-close" onclick="closePlayback()">×</button>
+            </div>
+            <div class="playback-content" id="playbackContent"></div>
+            <div class="playback-controls" id="playbackControls">
+                <button class="playback-btn btn-prev" onclick="prevMedia()">⬅️ 上一个</button>
+                <button class="playback-btn btn-next" onclick="nextMedia()">➡️ 下一个</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

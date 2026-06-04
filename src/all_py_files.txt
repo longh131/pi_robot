@@ -1,0 +1,2228 @@
+
+============================================================
+File: ./all_py_files.py
+============================================================
+
+"""
+脚本功能：将当前目录下所有子文件夹中的Python文件（.py）合并到一个文档中
+使用方法：直接运行此脚本，会在当前目录生成 all_py_files.txt 文件
+作者备注：可用于代码备份、代码审查或AI辅助分析等场景
+"""
+
+import os
+
+# ==================== 配置参数 ====================
+output_file = "all_py_files.txt"      # 输出的文件名
+current_dir = "."                       # 当前目录（"."表示脚本所在的目录）
+# =================================================
+
+# 打开输出文件（使用utf-8编码，支持中文）
+with open(output_file, "w", encoding="utf-8") as out_f:
+    
+    # os.walk 会遍历当前目录及其所有子目录
+    # root: 当前正在遍历的文件夹路径
+    # dirs: 当前文件夹下的子文件夹列表
+    # files: 当前文件夹下的文件列表
+    for root, dirs, files in os.walk(current_dir):
+        
+        # 遍历当前文件夹中的所有文件
+        for file in files:
+            
+            # 只处理以 .py 结尾的文件
+            if file.endswith(".py"):
+                
+                # 获取文件的完整路径
+                file_path = os.path.join(root, file)
+                
+                # 在输出文件中添加分隔线，标明文件来源
+                out_f.write(f"\n{'='*60}\n")
+                out_f.write(f"File: {file_path}\n")      # 写入文件路径
+                out_f.write(f"{'='*60}\n\n")
+                
+                # 尝试读取并写入文件内容
+                try:
+                    # 以只读方式打开Python文件（使用utf-8编码）
+                    with open(file_path, "r", encoding="utf-8") as in_f:
+                        out_f.write(in_f.read())          # 写入文件全部内容
+                except Exception as e:
+                    # 如果读取失败（如编码错误、权限问题等），记录错误信息
+                    out_f.write(f"Error reading file: {e}\n")
+                
+                # 文件内容后面加两个换行，便于区分不同文件
+                out_f.write("\n\n")
+
+# 运行完成后提示用户
+print(f"完成！所有Python文件已合并到 {output_file}")
+
+# ==================== 附加功能：仅生成文件清单 ====================
+# 如果只需要文件名清单（不需要内容），可以用下面的代码替换上面的内容
+
+with open("py_files_list.txt", "w", encoding="utf-8") as f:
+    for root, dirs, files in os.walk("."):
+        for file in files:
+            if file.endswith(".py"):
+                f.write(os.path.join(root, file) + "\n")
+
+print("文件清单已生成到 py_files_list.txt")
+
+
+
+
+============================================================
+File: ./__init__.py
+============================================================
+
+
+
+
+============================================================
+File: ./core/brain.py
+============================================================
+
+# src/core/brain.py（完整版，集成所有插件）
+import time
+import threading
+from typing import Dict, Optional, Any
+from pathlib import Path
+import sys
+import json
+from loguru import logger
+
+# 动态添加项目根目录到路径
+ROOT_DIR = Path(__file__).parent.parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from src.core.state import RobotState
+from src.core.state_machine import StateMachine
+from src.core.command_queue import CommandQueue, Command, CommandType
+from src.core.base_plugin import BasePlugin
+
+
+class RobotBrain:
+    """机器人核心大脑 - 状态机 + 指令队列 + 插件管理"""
+    
+    def __init__(self):
+        logger.info("--- 初始化机器人大脑 ---")
+        
+        # 加载配置
+        self._load_config()
+        
+        # 状态机
+        self.sm = StateMachine()
+        self.sm.add_listener(self._on_state_change)
+        
+        # 指令队列
+        self.cmd_queue = CommandQueue()
+        
+        # 插件管理
+        self.plugins: Dict[str, BasePlugin] = {}
+        
+        # 状态回调（供外部监听）
+        self._state_callbacks = []
+        
+        # 超时管理
+        self._awake_start_time: float = 0
+        self._idle_check_interval: float = 0.5
+        self._running = False
+        self._main_thread: Optional[threading.Thread] = None
+    
+    def _load_config(self) -> None:
+        """从 robot_profile.json 加载配置"""
+        try:
+            profile_path = ROOT_DIR / "data" / "robot_profile.json"
+            with open(profile_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                robot_cfg = data.get("robot", {})
+                self.exit_words = robot_cfg.get("exit_words", ["退出", "再见", "拜拜", "结束"])
+                self.awake_timeout = robot_cfg.get("awake_timeout", 120)
+                logger.info(f"[Brain] 加载配置: 退出词={self.exit_words}, 超时={self.awake_timeout}秒")
+        except Exception as e:
+            logger.warning(f"[Brain] 加载配置失败: {e}")
+            self.exit_words = ["退出", "再见", "拜拜", "结束"]
+            self.awake_timeout = 120
+    
+    # ========== 插件管理 ==========
+    
+    def register_plugin(self, name: str, plugin: BasePlugin) -> None:
+        """注册插件"""
+        logger.info(f"[Brain] 注册插件: {name}")
+        
+        if name in self.plugins:
+            print(f"[Brain] 插件 {name} 已存在，将被覆盖")
+        
+        plugin.set_brain(self)
+        plugin.on_load()
+        self.plugins[name] = plugin
+        print(f"[Brain] 插件已注册: {name}")
+    
+    def unregister_plugin(self, name: str) -> None:
+        """注销插件"""
+        if name in self.plugins:
+            self.plugins[name].on_unload()
+            del self.plugins[name]
+            print(f"[Brain] 插件已注销: {name}")
+    
+    def get_plugin(self, name: str) -> Optional[BasePlugin]:
+        """获取插件实例"""
+        return self.plugins.get(name)
+    
+    # ========== 状态监听 ==========
+    
+    def add_state_callback(self, callback) -> None:
+        """添加状态变化回调"""
+        self._state_callbacks.append(callback)
+    
+    def _on_state_change(self, old_state: RobotState, new_state: RobotState) -> None:
+        """状态变化时的内部处理"""
+        print(f"[Brain] 状态变化: {old_state.value} -> {new_state.value}")
+        
+        # 进入唤醒状态时记录开始时间
+        if new_state == RobotState.AWAKE:
+            self._awake_start_time = time.time()
+        
+        # 通知所有插件
+        for plugin in self.plugins.values():
+            try:
+                plugin.on_state_change(old_state, new_state)
+            except Exception as e:
+                print(f"[Brain] 插件 {plugin.name} 状态回调异常: {e}")
+        
+        # 通知外部回调
+        for callback in self._state_callbacks:
+            try:
+                callback(old_state, new_state)
+            except Exception as e:
+                print(f"[Brain] 状态回调异常: {e}")
+    
+    # ========== 核心接口 ==========
+    
+    def start(self) -> None:
+        """启动大脑"""
+        if self._running:
+            return
+        
+        self._running = True
+        self._main_thread = threading.Thread(target=self._main_loop, daemon=True)
+        self._main_thread.start()
+        logger.info("[Brain] 大脑已启动")
+        print("[Brain] 大脑已启动")
+        
+        # 自动启动唤醒插件
+        wake_plugin = self.get_plugin("wake")
+        if wake_plugin:
+            wake_plugin.start()
+        
+        # 自动启动远程插件
+        remote_plugin = self.get_plugin("remote")
+        if remote_plugin:
+            remote_plugin.start()
+    
+    def stop(self) -> None:
+        """停止大脑"""
+        self._running = False
+        if self._main_thread:
+            self._main_thread.join(timeout=2)
+        print("[Brain] 大脑已停止")
+    
+    def wake(self) -> bool:
+        """唤醒机器人（从IDLE进入AWAKE）"""
+        return self.sm.transition_to(RobotState.AWAKE)
+    
+    def sleep(self) -> bool:
+        """休眠机器人（回到IDLE）"""
+        return self.sm.transition_to(RobotState.IDLE)
+    
+    def remote_connect(self) -> bool:
+        """远程连接请求"""
+        if self.sm.can_transition_to(RobotState.REMOTE):
+            return self.sm.transition_to(RobotState.REMOTE)
+        else:
+            from src.core.state import StateTransition
+            msg = StateTransition.get_error_message(self.sm.state, RobotState.REMOTE)
+            if msg:
+                print(f"[Brain] 远程连接被拒绝: {msg}")
+            return False
+    
+    def remote_disconnect(self) -> bool:
+        """远程断开连接"""
+        if self.sm.state == RobotState.REMOTE:
+            return self.sm.transition_to(RobotState.IDLE)
+        return False
+    
+    def get_state(self) -> str:
+        """获取当前状态字符串"""
+        return self.sm.state.value
+    
+    def is_idle(self) -> bool:
+        return self.sm.state == RobotState.IDLE
+    
+    def is_awake(self) -> bool:
+        return self.sm.state == RobotState.AWAKE
+    
+    def is_remote(self) -> bool:
+        return self.sm.state == RobotState.REMOTE
+    
+    def submit_command(self, intent: str, params: Dict[str, Any],
+                       command_type: CommandType = CommandType.QUEUED,
+                       resources: set = None,
+                       callback: callable = None) -> bool:
+        """提交指令到队列"""
+        if self.sm.state != RobotState.AWAKE:
+            print(f"[Brain] 当前状态 {self.sm.state.value} 不能接收指令")
+            return False
+        
+        cmd = Command(
+            intent=intent,
+            params=params,
+            command_type=command_type,
+            resources=resources or set(),
+            callback=callback
+        )
+        
+        return self.cmd_queue.submit(cmd)
+    
+    # ========== 指令路由 ==========
+    
+    def _route_intent(self, intent: str, params: Dict[str, Any]) -> Any:
+        """将意图路由到对应的插件"""
+        for plugin in self.plugins.values():
+            if intent in plugin.get_supported_intents():
+                return plugin.execute(intent, params)
+        
+        print(f"[Brain] 未找到处理意图 {intent} 的插件")
+        return None
+    
+    # ========== 主循环 ==========
+    
+    def _main_loop(self) -> None:
+        """主循环"""
+        print("[Brain] 主循环已启动")
+        
+        while self._running:
+            # 超时检测：AWAKE状态超过配置秒数无交互自动回到IDLE
+            if self.sm.state == RobotState.AWAKE:
+                elapsed = time.time() - self._awake_start_time
+                if elapsed > self.awake_timeout:
+                    print(f"[Brain] AWAKE超时{self.awake_timeout}秒，自动休眠")
+                    self.sm.transition_to(RobotState.IDLE)
+            
+            time.sleep(self._idle_check_interval)
+    
+    # ========== 外部语音接口 ==========
+    
+    def on_asr_result(self, text: str) -> None:
+        """语音识别结果回调"""
+        if self.sm.state != RobotState.AWAKE:
+            print(f"[Brain] 当前状态 {self.sm.state.value} 不处理语音")
+            return
+        
+        # 重置超时计时器
+        self._awake_start_time = time.time()
+        
+        # 检测退出词
+        for word in self.exit_words:
+            if word in text:
+                print(f"[Brain] 检测到退出词: {word}")
+                self.sleep()
+                return
+        
+        print(f"[Brain] 收到ASR结果: {text}")
+        
+        # TODO: 意图解析 + 提交指令
+        self.submit_command("CHAT", {"text": text}, CommandType.CONCURRENT)
+
+
+# ========== 测试代码 ==========
+if __name__ == "__main__":
+    from src.plugins.buzzer.plugin import BuzzerPlugin
+    from src.plugins.led.plugin import LEDPlugin
+    from src.plugins.voice.wake_plugin import WakePlugin
+    from src.plugins.remote.plugin import RemotePlugin
+    from src.plugins.camera.plugin import CameraPlugin
+    from src.plugins.motor.plugin import MotorPlugin
+    
+    brain = RobotBrain()
+    
+    # 注册插件
+    brain.register_plugin("buzzer", BuzzerPlugin())
+    brain.register_plugin("led", LEDPlugin())
+    brain.register_plugin("wake", WakePlugin())
+    brain.register_plugin("remote", RemotePlugin())
+    brain.register_plugin("camera", CameraPlugin())
+    brain.register_plugin("motor", MotorPlugin())
+    
+    # 启动大脑（会自动启动 wake 和 remote 插件）
+    brain.start()
+    
+    print("\n" + "="*50)
+    print("小派机器人已启动")
+    print("远程控制: http://<树莓派IP>:5000")
+    print("状态互斥测试进行中...")
+    print("="*50 + "\n")
+    
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n正在关闭...")
+        brain.stop()
+
+
+============================================================
+File: ./core/state.py
+============================================================
+
+# src/core/state.py
+from enum import Enum
+from typing import Set, Tuple, Optional
+
+
+class RobotState(Enum):
+    """机器人状态枚举"""
+    IDLE = "idle"      # 待机：监听唤醒词
+    AWAKE = "awake"    # 唤醒：语音交互中
+    REMOTE = "remote"  # 远程：网页控制中
+
+
+class StateTransition:
+    """状态转换规则（硬编码，AI不参与决策）"""
+    
+    # 允许的转换: (from_state, to_state)
+    _ALLOWED: Set[Tuple[RobotState, RobotState]] = {
+        # 从待机可以进入
+        (RobotState.IDLE, RobotState.AWAKE),
+        (RobotState.IDLE, RobotState.REMOTE),
+        # 从唤醒只能回到待机
+        (RobotState.AWAKE, RobotState.IDLE),
+        # 从远程只能回到待机
+        (RobotState.REMOTE, RobotState.IDLE),
+    }
+    
+    # 拒绝时的提示消息
+    _ERROR_MESSAGES: dict[Tuple[RobotState, RobotState], str] = {
+        (RobotState.AWAKE, RobotState.REMOTE): "小派正在工作中，请稍后再试",
+        (RobotState.REMOTE, RobotState.AWAKE): "远程控制中，请先断开连接",
+    }
+    
+    @classmethod
+    def can_transition(cls, from_state: RobotState, to_state: RobotState) -> bool:
+        """检查状态转换是否允许"""
+        if from_state == to_state:
+            return True
+        return (from_state, to_state) in cls._ALLOWED
+    
+    @classmethod
+    def get_error_message(cls, from_state: RobotState, to_state: RobotState) -> Optional[str]:
+        """获取拒绝转换时的提示消息"""
+        return cls._ERROR_MESSAGES.get((from_state, to_state))
+    
+    @classmethod
+    def get_allowed_transitions(cls, from_state: RobotState) -> list[RobotState]:
+        """获取从当前状态允许转换到的所有状态"""
+        return [to for (f, to) in cls._ALLOWED if f == from_state]
+
+
+============================================================
+File: ./core/state_machine.py
+============================================================
+
+# src/core/state_machine.py
+import threading
+from typing import Callable, Optional, List
+from loguru import logger
+from src.core.state import RobotState, StateTransition
+
+
+class StateMachine:
+    """线程安全的状态机"""
+    
+    def __init__(self):
+        self._state: RobotState = RobotState.IDLE
+        self._lock: threading.RLock = threading.RLock()
+        self._listeners: List[Callable[[RobotState, RobotState], None]] = []
+    
+    @property
+    def state(self) -> RobotState:
+        """获取当前状态"""
+        with self._lock:
+            return self._state
+    
+    def add_listener(self, callback: Callable[[RobotState, RobotState], None]) -> None:
+        """
+        添加状态变化监听器
+        callback 参数: (old_state, new_state)
+        """
+        self._listeners.append(callback)
+    
+    def remove_listener(self, callback: Callable[[RobotState, RobotState], None]) -> None:
+        """移除监听器"""
+        if callback in self._listeners:
+            self._listeners.remove(callback)
+    
+    def _notify_listeners(self, old_state: RobotState, new_state: RobotState) -> None:
+        """通知所有监听器"""
+        for listener in self._listeners:
+            try:
+                listener(old_state, new_state)
+            except Exception as e:
+                logger.error(f"监听器回调异常: {e}")
+    
+    def transition_to(self, new_state: RobotState) -> bool:
+        """
+        请求状态转换
+        返回: 是否成功
+        """
+        with self._lock:
+            old_state = self._state
+            
+            # 相同状态，直接返回成功
+            if old_state == new_state:
+                return True
+            
+            # 检查转换是否允许
+            if not StateTransition.can_transition(old_state, new_state):
+                logger.warning(f"拒绝转换: {old_state.value} -> {new_state.value}")
+                return False
+            
+            # 执行转换
+            logger.info(f"[StateMachine] {old_state.value} -> {new_state.value}")
+            self._state = new_state
+            
+            # 通知监听器（在锁内但列表拷贝，避免回调死锁）
+            listeners = self._listeners.copy()
+        
+        # 在锁外通知，避免回调中再次调用状态转换导致死锁
+        for listener in listeners:
+            try:
+                listener(old_state, new_state)
+            except Exception as e:
+                logger.error(f"[StateMachine] 监听器回调异常: {e}")
+        
+        return True
+    
+    def can_transition_to(self, new_state: RobotState) -> bool:
+        """检查是否可以转换到目标状态"""
+        with self._lock:
+            return StateTransition.can_transition(self._state, new_state)
+    
+    def force_set_state(self, new_state: RobotState) -> None:
+        """
+        强制设置状态（仅用于测试，不触发监听器）
+        警告：生产代码不要使用
+        """
+        with self._lock:
+            self._state = new_state
+
+
+============================================================
+File: ./core/command_queue.py
+============================================================
+
+# src/core/command_queue.py
+import threading
+import time
+from enum import Enum
+from dataclasses import dataclass, field
+from typing import Optional, Set, List, Dict, Any, Callable
+from collections import deque
+from loguru import logger
+
+
+class CommandType(Enum):
+    """指令类型 - 决定执行策略"""
+    PREEMPTIVE = 1   # 抢占型：立即打断当前，清空队列
+    EXCLUSIVE = 2    # 独占型：执行期间屏蔽同类
+    QUEUED = 3       # 排队型：按序执行，不互相打断
+    CONCURRENT = 4   # 并发型：不占用资源，可同时执行
+
+
+@dataclass
+class Command:
+    """指令数据类"""
+    intent: str
+    params: Dict[str, Any]
+    command_type: CommandType
+    resources: Set[str] = field(default_factory=set)
+    timestamp: float = field(default_factory=time.time)
+    callback: Optional[Callable[[Any], None]] = None
+
+
+class CommandQueue:
+    """指令队列 - 优先级 + 资源锁 + 并发控制"""
+    
+    def __init__(self):
+        self._queue: deque = deque()
+        self._lock: threading.RLock = threading.RLock()
+        self._current_command: Optional[Command] = None
+        self._resource_locks: Dict[str, bool] = {}  # 资源占用状态
+        self._is_processing: bool = False
+        self._condition: threading.Condition = threading.Condition(self._lock)
+    
+    def _can_execute(self, cmd: Command) -> bool:
+        """检查指令是否可以立即执行"""
+        # 抢占型总是可以执行
+        if cmd.command_type == CommandType.PREEMPTIVE:
+            return True
+        
+        # 检查资源是否被占用
+        for res in cmd.resources:
+            if self._resource_locks.get(res, False):
+                return False
+        
+        return True
+    
+    def _lock_resources(self, resources: Set[str]) -> None:
+        """锁定资源"""
+        for res in resources:
+            self._resource_locks[res] = True
+    
+    def _unlock_resources(self, resources: Set[str]) -> None:
+        """释放资源"""
+        for res in resources:
+            self._resource_locks[res] = False
+    
+    def _execute(self, cmd: Command) -> None:
+        """执行指令（内部方法）"""
+        self._current_command = cmd
+        self._lock_resources(cmd.resources)
+        
+        # 调用回调执行指令
+        if cmd.callback:
+            try:
+                cmd.callback(cmd)
+            except Exception as e:
+                logger.error(f"[CommandQueue] 指令执行异常: {e}")
+        
+        self._current_command = None
+        self._unlock_resources(cmd.resources)
+    
+    def submit(self, cmd: Command) -> bool:
+        """
+        提交指令
+        返回: 是否成功提交（注意：不等于执行完成）
+        """
+        with self._lock:
+            # 抢占型指令：清空队列，打断当前
+            if cmd.command_type == CommandType.PREEMPTIVE:
+                self._queue.clear()
+                self._condition.notify()
+                # 如果有当前指令，它会自然结束或被打断
+                # 直接在当前线程执行（立即）
+                self._execute(cmd)
+                return True
+            
+            # 如果可以立即执行
+            if not self._is_processing and self._can_execute(cmd):
+                self._is_processing = True
+                self._execute(cmd)
+                self._is_processing = False
+                # 处理队列中下一个
+                self._process_next()
+                return True
+            
+            # 否则加入队列
+            self._queue.append(cmd)
+            self._condition.notify()
+            return True
+    
+    def _process_next(self) -> None:
+        """处理队列中的下一个指令"""
+        with self._lock:
+            while self._queue:
+                cmd = self._queue[0]
+                if self._can_execute(cmd):
+                    self._queue.popleft()
+                    self._is_processing = True
+                    self._execute(cmd)
+                    self._is_processing = False
+                else:
+                    # 资源被占，等待
+                    break
+    
+    def get_queue_size(self) -> int:
+        """获取队列长度"""
+        with self._lock:
+            return len(self._queue)
+    
+    def get_current_command(self) -> Optional[Command]:
+        """获取当前正在执行的指令"""
+        with self._lock:
+            return self._current_command
+    
+    def clear(self) -> None:
+        """清空队列（不打断当前执行）"""
+        with self._lock:
+            self._queue.clear()
+    
+    def is_busy(self) -> bool:
+        """队列是否繁忙（有正在执行的指令或有等待队列）"""
+        with self._lock:
+            return self._is_processing or len(self._queue) > 0
+    
+    def get_resource_status(self) -> Dict[str, bool]:
+        """获取资源占用状态（用于调试）"""
+        with self._lock:
+            return self._resource_locks.copy()
+
+
+============================================================
+File: ./core/base_plugin.py
+============================================================
+
+# src/core/base_plugin.py
+from abc import ABC, abstractmethod
+from typing import Any, Dict, Optional
+from src.core.state import RobotState
+
+
+class BasePlugin(ABC):
+    """
+    插件基类
+    所有插件必须继承此类并实现所有抽象方法
+    """
+    
+    def __init__(self, name: str):
+        self.name = name
+        self._enabled: bool = True
+        self._brain: Optional[Any] = None  # Brain实例引用
+    
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+    
+    def set_enabled(self, enabled: bool) -> None:
+        """启用/禁用插件"""
+        self._enabled = enabled
+    
+    def set_brain(self, brain: Any) -> None:
+        """设置Brain引用（由Brain调用）"""
+        self._brain = brain
+    
+    # ========== 生命周期方法（可选实现） ==========
+    
+    def on_load(self) -> None:
+        """插件加载时调用（初始化）"""
+        pass
+    
+    def on_unload(self) -> None:
+        """插件卸载时调用（清理资源）"""
+        pass
+    
+    def on_state_change(self, old_state: RobotState, new_state: RobotState) -> None:
+        """状态变化时调用"""
+        pass
+    
+    # ========== 核心方法（必须实现） ==========
+    
+    @abstractmethod
+    def execute(self, intent: str, params: Dict[str, Any]) -> Any:
+        """
+        执行指令
+        返回: 执行结果
+        """
+        pass
+    
+    @abstractmethod
+    def get_supported_intents(self) -> list:
+        """
+        返回此插件支持的所有意图列表
+        用于Brain路由
+        """
+        pass
+
+
+============================================================
+File: ./core/__init__.py
+============================================================
+
+
+
+
+============================================================
+File: ./plugins/__init__.py
+============================================================
+
+
+
+
+============================================================
+File: ./plugins/buzzer/plugin.py
+============================================================
+
+# src/plugins/buzzer/plugin.py
+import time
+from typing import Any, Dict
+
+from src.core.base_plugin import BasePlugin
+from src.core.state import RobotState
+
+try:
+    from gpiozero import PWMOutputDevice
+    BUZZER_AVAILABLE = True
+except ImportError:
+    BUZZER_AVAILABLE = False
+    print("[BuzzerPlugin] gpiozero 未安装，蜂鸣器不可用")
+
+
+class BuzzerPlugin(BasePlugin):
+    """蜂鸣器插件 - 无源PWM蜂鸣器 (GPIO 12)"""
+    
+    def __init__(self, pin: int = 12, frequency: int = 2000):
+        super().__init__("buzzer")
+        self.pin = pin
+        self.default_freq = frequency
+        self._buzzer = None
+        self._available = BUZZER_AVAILABLE
+    
+    def on_load(self) -> None:
+        if not self._available:
+            print("[BuzzerPlugin] 蜂鸣器不可用（gpiozero未安装）")
+            return
+        
+        try:
+            self._buzzer = PWMOutputDevice(self.pin, frequency=self.default_freq)
+            print(f"[BuzzerPlugin] 蜂鸣器已初始化 (GPIO {self.pin})")
+        except Exception as e:
+            print(f"[BuzzerPlugin] 蜂鸣器初始化失败: {e}")
+            self._available = False
+    
+    def on_unload(self) -> None:
+        if self._buzzer:
+            self._buzzer.off()
+            self._buzzer.close()
+            print("[BuzzerPlugin] 蜂鸣器已关闭")
+    
+    def beep(self, times: int = 1, duration: float = 0.1, frequency: int = None) -> None:
+        """蜂鸣器响几声"""
+        if not self._available or not self._buzzer:
+            return
+        
+        freq = frequency or self.default_freq
+        self._buzzer.frequency = freq
+        
+        for i in range(times):
+            self._buzzer.value = 0.5
+            time.sleep(duration)
+            self._buzzer.off()
+            if i < times - 1:
+                time.sleep(duration)
+    
+    def execute(self, intent: str, params: Dict[str, Any]) -> Any:
+        if intent == "BEEP":
+            times = params.get("times", 1)
+            duration = params.get("duration", 0.1)
+            frequency = params.get("frequency", None)
+            self.beep(times, duration, frequency)
+            return {"status": "ok", "action": "beep"}
+        return {"status": "ignored"}
+    
+    def get_supported_intents(self) -> list:
+        return ["BEEP"]
+    
+    def on_state_change(self, old_state: RobotState, new_state: RobotState) -> None:
+        pass
+
+
+============================================================
+File: ./plugins/camera/plugin.py
+============================================================
+
+import threading
+import time
+from typing import Any, Dict
+import os
+from datetime import datetime
+
+from src.core.base_plugin import BasePlugin
+from src.core.state import RobotState
+
+# picamera2 导入（树莓派专用）
+try:
+    from picamera2 import Picamera2
+    import cv2
+    import numpy as np
+    PICAMERA2_AVAILABLE = True
+except ImportError as e:
+    PICAMERA2_AVAILABLE = False
+    print(f"[CameraPlugin] 缺少依赖库: {e}")
+    print("[CameraPlugin] 请运行: sudo apt install libcamera-tools && pip install picamera2 opencv-python")
+
+
+class CameraPlugin(BasePlugin):
+    """摄像头插件 - 使用 picamera2，提供MJPEG视频流、拍照和录像功能"""
+    
+    def __init__(self):
+        super().__init__("camera")
+        self._running = False
+        self._picamera = None
+        self._frame = None
+        self._frame_lock = threading.Lock()
+        self._capture_thread = None
+        self._available = PICAMERA2_AVAILABLE
+        
+        # 录像相关
+        self._recording = False
+        self._recording_path = None
+        
+        # 媒体目录
+        self._media_dir = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'data', 'media')
+        os.makedirs(self._media_dir, exist_ok=True)
+
+    def on_load(self) -> None:
+        """初始化摄像头"""
+        print(f"[CameraPlugin] picamera2可用: {self._available}")
+        if not self._available:
+            print("[CameraPlugin] 依赖未安装，摄像头不可用")
+            return
+        
+        try:
+            self._picamera = Picamera2()
+            # 配置为预览模式（高帧率）
+            preview_config = self._picamera.create_preview_configuration(main={"size": (640, 480)})
+            self._picamera.configure(preview_config)
+            self._picamera.start()
+            time.sleep(2)  # 摄像头预热
+            print("[CameraPlugin] 摄像头初始化成功")
+        except Exception as e:
+            print(f"[CameraPlugin] 摄像头初始化失败: {e}")
+            self._picamera = None
+
+    def on_unload(self) -> None:
+        """释放资源"""
+        self.stop()
+        self.stop_recording()
+        if self._picamera:
+            try:
+                self._picamera.stop()
+                print("[CameraPlugin] 摄像头已停止")
+            except Exception as e:
+                print(f"[CameraPlugin] 停止摄像头失败: {e}")
+        print("[CameraPlugin] 已卸载")
+    
+    def start(self) -> None:
+        """启动视频捕获线程"""
+        print(f"[CameraPlugin] start() - available:{self._available}, running:{self._running}, picamera:{self._picamera}")
+        if not self._available or self._running:
+            return
+        
+        if not self._picamera:
+            print("[CameraPlugin] 摄像头未初始化")
+            return
+        
+        self._running = True
+        self._capture_thread = threading.Thread(
+            target=self._capture_loop,
+            daemon=True
+        )
+        self._capture_thread.start()
+        print("[CameraPlugin] 视频捕获已启动")
+
+    def stop(self) -> None:
+        """停止视频捕获"""
+        self._running = False
+        if self._capture_thread:
+            self._capture_thread.join(timeout=2)
+        print("[CameraPlugin] 视频捕获已停止")
+    
+    def _capture_loop(self) -> None:
+        """视频捕获循环"""
+        while self._running:
+            try:
+                # 使用 picamera2 捕获帧
+                frame = self._picamera.capture_array()
+                if frame is not None:
+                    # picamera2 返回的是 RGB 格式，需要转换为 BGR（OpenCV格式）
+                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    with self._frame_lock:
+                        self._frame = frame_bgr.copy()
+                time.sleep(0.03)  # ~30fps
+            except Exception as e:
+                print(f"[CameraPlugin] 捕获异常: {e}")
+                time.sleep(0.1)
+
+    def get_frame(self) -> bytes:
+        """获取当前帧（JPEG格式）"""
+        with self._frame_lock:
+            if self._frame is None:
+                return b''
+            
+            # 转换为JPEG格式
+            ret, jpeg = cv2.imencode('.jpg', self._frame)
+            if ret:
+                return jpeg.tobytes()
+            return b''
+
+    def get_frame_size(self) -> tuple:
+        """获取帧尺寸"""
+        return (640, 480)
+
+    def start_recording(self) -> bool:
+        """开始录像"""
+        if not self._available or not self._picamera:
+            return False
+        
+        if self._recording:
+            return False
+        
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            video_path = os.path.join(self._media_dir, f"video_{timestamp}.h264")
+            
+            # 切换到视频配置
+            video_config = self._picamera.create_video_configuration()
+            self._picamera.stop()
+            self._picamera.configure(video_config)
+            self._picamera.start()
+            
+            self._recording = True
+            self._recording_path = video_path
+            
+            # 启动录制
+            self._picamera.start_and_record_video(video_path)
+            print(f"[CameraPlugin] 开始录像: {video_path}")
+            return True
+        except Exception as e:
+            print(f"[CameraPlugin] 录像启动失败: {e}")
+            self._recording = False
+            return False
+
+    def stop_recording(self) -> str:
+        """停止录像"""
+        if not self._recording:
+            return "没有在录像"
+        
+        try:
+            self._picamera.stop_recording()
+            self._recording = False
+            
+            # 切换回预览模式
+            preview_config = self._picamera.create_preview_configuration(main={"size": (640, 480)})
+            self._picamera.stop()
+            self._picamera.configure(preview_config)
+            self._picamera.start()
+            
+            print(f"[CameraPlugin] 停止录像: {self._recording_path}")
+            filename = os.path.basename(self._recording_path)
+            return f"ok:{filename}"
+        except Exception as e:
+            print(f"[CameraPlugin] 停止录像失败: {e}")
+            self._recording = False
+            return str(e)
+
+    def take_photo(self) -> str:
+        """拍照"""
+        if not self._available or not self._picamera:
+            return "camera_not_ready"
+        
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f'photo_{timestamp}.jpg'
+            photo_path = os.path.join(self._media_dir, filename)
+            
+            # 使用 still 配置拍照
+            still_config = self._picamera.create_still_configuration()
+            self._picamera.switch_mode_and_capture_file(still_config, photo_path)
+            
+            print(f"[CameraPlugin] 拍照成功: {photo_path}")
+            return f"ok:{filename}"
+        except Exception as e:
+            print(f"[CameraPlugin] 拍照失败: {e}")
+            return str(e)
+
+    def is_recording(self) -> bool:
+        """检查是否正在录像"""
+        return self._recording
+
+    def execute(self, intent: str, params: Dict[str, Any]) -> Any:
+        if intent == "CAMERA_START":
+            self.start()
+            return {"status": "ok"}
+        elif intent == "CAMERA_STOP":
+            self.stop()
+            return {"status": "ok"}
+        elif intent == "CAPTURE":
+            result = self.take_photo()
+            if result.startswith("ok:"):
+                return {"status": "ok", "filename": result[3:]}
+            return {"status": "error", "message": result}
+        elif intent == "START_RECORDING":
+            success = self.start_recording()
+            return {"status": "ok" if success else "error"}
+        elif intent == "STOP_RECORDING":
+            result = self.stop_recording()
+            if result.startswith("ok:"):
+                return {"status": "ok", "filename": result[3:]}
+            return {"status": "error", "message": result}
+        elif intent == "IS_RECORDING":
+            return {"status": "ok", "recording": self.is_recording()}
+        return {"status": "ignored"}
+
+    def get_supported_intents(self) -> list:
+        return ["CAMERA_START", "CAMERA_STOP", "CAPTURE", "START_RECORDING", "STOP_RECORDING", "IS_RECORDING"]
+    
+    def on_state_change(self, old_state: RobotState, new_state: RobotState) -> None:
+        """状态变化时处理"""
+        # 远程控制状态时自动启动摄像头
+        if new_state == RobotState.REMOTE:
+            self.start()
+        # 退出远程状态时停止摄像头（节省资源）
+        elif old_state == RobotState.REMOTE and new_state != RobotState.REMOTE:
+            self.stop()
+
+
+============================================================
+File: ./plugins/camera/__init__.py
+============================================================
+
+# Camera Plugin Package
+
+
+============================================================
+File: ./plugins/voice/wake.py
+============================================================
+
+import json
+import os
+import sys
+import time
+import numpy as np
+import sounddevice as sd
+import sherpa_onnx
+from pathlib import Path
+
+# 动态添加项目根目录到路径
+ROOT_DIR = Path(__file__).parent.parent.parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+# 动态获取项目根目录 (pi/)
+BASE_DIR = str(ROOT_DIR)
+PROFILE_PATH = os.path.join(BASE_DIR, "data/robot_profile.json")
+MODEL_DIR = os.path.join(BASE_DIR, "models/asr/streaming_model")
+SAMPLE_RATE = 16000
+
+class WakeEngine:
+    def __init__(self):
+        self.wake_words = self._load_wake_words()
+        self.recognizer = self._init_recognizer()
+
+    def _load_wake_words(self) -> list:
+        try:
+            with open(PROFILE_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get("robot", {}).get("wake_words", [])
+        except Exception as e:
+            print(f"Error loading profile at {PROFILE_PATH}: {e}")
+            return []
+
+    def _init_recognizer(self):
+        try:
+            # 适配你列表中的 int8 文件名
+            recognizer = sherpa_onnx.OnlineRecognizer.from_transducer(
+                tokens=os.path.join(MODEL_DIR, "tokens.txt"),
+                encoder=os.path.join(MODEL_DIR, "encoder-epoch-99-avg-1.onnx"),
+                decoder=os.path.join(MODEL_DIR, "decoder-epoch-99-avg-1.onnx"),
+                joiner=os.path.join(MODEL_DIR, "joiner-epoch-99-avg-1.onnx"),
+                num_threads=4, # 树莓派5B性能强劲，可适当增加线程
+                sample_rate=SAMPLE_RATE,
+                feature_dim=80,
+            )
+            return recognizer
+        except Exception as e:
+            print(f"Recognizer init failed: {e}")
+            sys.exit(1)
+
+    def listen_and_wake(self, stop_check=None) -> bool:
+        if not self.wake_words:
+            return False
+
+        stream = self.recognizer.create_stream()
+
+        def audio_callback(indata, frames, time, status):
+            samples = indata.reshape(-1).astype(np.float32)
+            stream.accept_waveform(SAMPLE_RATE, samples)
+
+        try:
+            with sd.InputStream(channels=1, dtype='float32', samplerate=SAMPLE_RATE, callback=audio_callback):
+                while True:
+                    # 检查是否需要停止（状态改变时）
+                    if stop_check and stop_check():
+                        self.recognizer.reset(stream)
+                        return False
+                    
+                    if self.recognizer.is_ready(stream):
+                        self.recognizer.decode_stream(stream)
+                    
+                    text = self.recognizer.get_result(stream).strip()
+                    if text:
+                        for word in self.wake_words:
+                            if word in text:
+                                self.recognizer.reset(stream)
+                                return True
+                    time.sleep(0.01)
+        except Exception as e:
+            print(f"Audio stream error: {e}")
+            return False
+
+
+
+============================================================
+File: ./plugins/voice/wake_plugin.py
+============================================================
+
+# src/plugins/voice/wake_plugin.py
+import threading
+import time
+from typing import Any, Dict
+
+from src.core.base_plugin import BasePlugin
+from src.core.state import RobotState
+from src.plugins.voice.wake import WakeEngine
+
+
+class WakePlugin(BasePlugin):
+    """唤醒词插件 - 包装原有 WakeEngine"""
+    
+    def __init__(self, check_interval: float = 0.05):
+        super().__init__("wake")
+        self.check_interval = check_interval
+        self._running = False
+        self._thread = None
+        self._engine = None
+        self._buzzer = None
+        self._should_stop = False  # 用于中断 listen_and_wake
+    
+    def on_load(self) -> None:
+        """初始化唤醒引擎"""
+        try:
+            self._engine = WakeEngine()
+            print("[WakePlugin] 唤醒引擎已初始化")
+        except Exception as e:
+            print(f"[WakePlugin] 唤醒引擎初始化失败: {e}")
+    
+    def set_brain(self, brain) -> None:
+        """设置 Brain 引用并缓存 buzzer"""
+        super().set_brain(brain)
+        if brain:
+            self._buzzer = brain.get_plugin("buzzer")
+            if self._buzzer:
+                print("[WakePlugin] buzzer 插件已缓存")
+            else:
+                print("[WakePlugin] 警告: buzzer 插件未找到")
+    
+    def on_unload(self) -> None:
+        """停止检测线程"""
+        self.stop()
+    
+    def start(self) -> None:
+        """启动唤醒检测线程"""
+        if self._running:
+            return
+        
+        # 等待 buzzer 就绪（最多等待 1 秒）
+        wait_count = 0
+        while self._buzzer is None and wait_count < 20:
+            time.sleep(0.05)
+            wait_count += 1
+        
+        self._running = True
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        print("[WakePlugin] 唤醒检测已启动")
+    
+    def stop(self) -> None:
+        """停止唤醒检测"""
+        self._running = False
+        
+        # 设置停止标志，中断当前监听
+        self._should_stop = True
+        
+        if self._thread:
+            self._thread.join(timeout=1)
+        
+        # 确保音频流被释放
+        if self._engine and hasattr(self._engine, 'cleanup') and callable(self._engine.cleanup):
+            try:
+                self._engine.cleanup()
+                print("[WakePlugin] 音频引擎已清理")
+            except Exception as e:
+                print(f"[WakePlugin] 清理音频引擎失败: {e}")
+        
+        print("[WakePlugin] 唤醒检测已停止")
+    
+    def _run(self) -> None:
+        """检测循环"""
+        while self._running:
+            if not self._brain:
+                time.sleep(self.check_interval)
+                continue
+            
+            current_state = self._brain.get_state()
+            
+            # IDLE 状态：正常检测唤醒
+            if current_state == "idle":
+                try:
+                    # 重置停止标志
+                    self._should_stop = False
+                    # 传入 stop_check 回调，允许状态变化时中断
+                    if self._engine and self._engine.listen_and_wake(stop_check=lambda: self._should_stop):
+                        print("[WakePlugin] 检测到唤醒词")
+                        self._brain.wake()
+                except Exception as e:
+                    print(f"[WakePlugin] 检测异常: {e}")
+            
+            # REMOTE 状态：继续检测，但只触发蜂鸣器
+            elif current_state == "remote":
+                try:
+                    # 重置停止标志
+                    self._should_stop = False
+                    # 传入 stop_check 回调，允许状态变化时中断
+                    if self._engine and self._engine.listen_and_wake(stop_check=lambda: self._should_stop):
+                        print("[WakePlugin] REMOTE状态下检测到唤醒词，拒绝")
+                        self._on_wake_rejected()
+                        # 短暂等待，让状态有足够时间同步
+                        time.sleep(0.2)
+                except Exception as e:
+                    print(f"[WakePlugin] 检测异常: {e}")
+            
+            # AWAKE 状态：不检测唤醒词
+            time.sleep(self.check_interval)
+    
+    def _on_wake_rejected(self) -> None:
+        """唤醒被拒绝时的反馈（蜂鸣器三声）"""
+        if self._buzzer:
+            self._buzzer.beep(times=3, duration=0.1, frequency=2000)
+    
+    def execute(self, intent: str, params: Dict[str, Any]) -> Any:
+        if intent == "WAKE_START":
+            self.start()
+            return {"status": "ok"}
+        elif intent == "WAKE_STOP":
+            self.stop()
+            return {"status": "ok"}
+        return {"status": "ignored"}
+    
+    def get_supported_intents(self) -> list:
+        return ["WAKE_START", "WAKE_STOP"]
+    
+    def on_state_change(self, old_state: RobotState, new_state: RobotState) -> None:
+        """状态变化时处理"""
+        if not self._brain:
+            return
+        
+        # 状态变化时设置停止标志，中断当前的监听循环
+        self._should_stop = True
+        
+        # 如果进入 IDLE 状态且未运行，则启动检测
+        if new_state == RobotState.IDLE and not self._running:
+            self.start()
+
+
+============================================================
+File: ./plugins/voice/__init__.py
+============================================================
+
+
+
+
+============================================================
+File: ./plugins/led/plugin.py
+============================================================
+
+# src/plugins/led/plugin.py
+import time
+import threading
+from typing import Any, Dict
+
+from src.core.base_plugin import BasePlugin
+from src.core.state import RobotState
+
+try:
+    from gpiozero import PWMLED
+    LED_AVAILABLE = True
+except ImportError:
+    LED_AVAILABLE = False
+    print("[LEDPlugin] gpiozero 未安装，LED 不可用")
+
+
+class LEDPlugin(BasePlugin):
+    """
+    LED 状态灯插件 (GPIO 16)
+    
+    状态映射:
+    - IDLE: 呼吸闪烁 (慢)
+    - AWAKE: 常亮
+    - REMOTE: 快速闪烁
+    """
+    
+    def __init__(self, pin: int = 16):
+        super().__init__("led")
+        self.pin = pin
+        self._led = None
+        self._available = LED_AVAILABLE
+        self._blink_thread = None
+        self._stop_blink = False
+    
+    def on_load(self) -> None:
+        """加载插件，初始化 LED"""
+        if not self._available:
+            print("[LEDPlugin] LED 不可用（gpiozero未安装）")
+            return
+        
+        try:
+            self._led = PWMLED(self.pin)
+            print(f"[LEDPlugin] LED 已初始化 (GPIO {self.pin})")
+            self._set_idle_pattern()  # 默认 IDLE 模式
+        except Exception as e:
+            print(f"[LEDPlugin] LED 初始化失败: {e}")
+            self._available = False
+    
+    def on_unload(self) -> None:
+        """卸载插件，释放资源"""
+        self._stop_blinking()
+        if self._led:
+            self._led.off()
+            self._led.close()
+            print("[LEDPlugin] LED 已关闭")
+    
+    def _stop_blinking(self) -> None:
+        """停止闪烁线程"""
+        self._stop_blink = True
+        if self._blink_thread and self._blink_thread.is_alive():
+            self._blink_thread.join(timeout=0.5)
+        self._stop_blink = False
+        self._blink_thread = None
+    
+    def _set_breathing(self, speed: float = 0.02) -> None:
+        """呼吸闪烁效果（IDLE 状态）"""
+        self._stop_blinking()
+        
+        def breathe():
+            while not self._stop_blink and self._led:
+                # 渐亮
+                for i in range(0, 101, 5):
+                    if self._stop_blink:
+                        break
+                    self._led.value = i / 100.0
+                    time.sleep(speed)
+                # 渐灭
+                for i in range(100, -1, -5):
+                    if self._stop_blink:
+                        break
+                    self._led.value = i / 100.0
+                    time.sleep(speed)
+        
+        self._blink_thread = threading.Thread(target=breathe, daemon=True)
+        self._blink_thread.start()
+    
+    def _set_blink(self, interval: float = 0.2) -> None:
+        """快速闪烁效果（REMOTE 状态）"""
+        self._stop_blinking()
+        
+        def blink():
+            while not self._stop_blink and self._led:
+                self._led.on()
+                time.sleep(interval)
+                if self._stop_blink:
+                    break
+                self._led.off()
+                time.sleep(interval)
+        
+        self._blink_thread = threading.Thread(target=blink, daemon=True)
+        self._blink_thread.start()
+    
+    def _set_constant(self, brightness: float = 0.8) -> None:
+        """常亮效果（AWAKE 状态）"""
+        self._stop_blinking()
+        if self._led:
+            self._led.value = brightness
+    
+    def _set_idle_pattern(self) -> None:
+        """IDLE 状态 - 呼吸闪烁"""
+        self._set_breathing(speed=0.02)
+    
+    def _set_awake_pattern(self) -> None:
+        """AWAKE 状态 - 常亮"""
+        self._set_constant(brightness=0.8)
+    
+    def _set_remote_pattern(self) -> None:
+        """REMOTE 状态 - 快速闪烁"""
+        self._set_blink(interval=0.2)
+    
+    def execute(self, intent: str, params: Dict[str, Any]) -> Any:
+        """执行指令"""
+        if intent == "LED_ON":
+            self._set_constant(0.8)
+            return {"status": "ok"}
+        elif intent == "LED_OFF":
+            self._led.off()
+            return {"status": "ok"}
+        elif intent == "LED_BLINK":
+            interval = params.get("interval", 0.2)
+            self._set_blink(interval)
+            return {"status": "ok"}
+        
+        return {"status": "ignored"}
+    
+    def get_supported_intents(self) -> list:
+        return ["LED_ON", "LED_OFF", "LED_BLINK"]
+    
+    def on_state_change(self, old_state: RobotState, new_state: RobotState) -> None:
+        """状态变化时更新 LED 模式"""
+        if new_state == RobotState.IDLE:
+            self._set_idle_pattern()
+        elif new_state == RobotState.AWAKE:
+            self._set_awake_pattern()
+        elif new_state == RobotState.REMOTE:
+            self._set_remote_pattern()
+
+
+============================================================
+File: ./plugins/led/__init__.py
+============================================================
+
+
+
+
+============================================================
+File: ./plugins/motor/plugin.py
+============================================================
+
+import threading
+import time
+from typing import Any, Dict
+
+from src.core.base_plugin import BasePlugin
+from src.core.state import RobotState
+from src.common.config_loader import ConfigLoader
+
+try:
+    from gpiozero import DigitalOutputDevice, PWMOutputDevice
+    GPIOZERO_AVAILABLE = True
+except ImportError:
+    GPIOZERO_AVAILABLE = False
+    print("[MotorPlugin] gpiozero 未安装，将使用模拟模式")
+
+
+class MotorPlugin(BasePlugin):
+    """电机控制插件 - 支持前进/后退/左转/右转/停止及加减速"""
+    
+    def __init__(self):
+        super().__init__("motor")
+        self._running = False
+        self._available = GPIOZERO_AVAILABLE
+        
+        # 速度控制（0-100）
+        self._speed = int(float(ConfigLoader.get("MOTOR_SPEED", "0.5")) * 100)
+        self._max_speed = 100
+        self._min_speed = 0
+        self._speed_step = 10
+        
+        # GPIO 引脚定义（从配置读取）
+        self._left_forward_pin = int(ConfigLoader.get("MOTOR_LEFT_FORWARD", "17"))
+        self._left_backward_pin = int(ConfigLoader.get("MOTOR_LEFT_BACKWARD", "18"))
+        self._right_forward_pin = int(ConfigLoader.get("MOTOR_RIGHT_FORWARD", "27"))
+        self._right_backward_pin = int(ConfigLoader.get("MOTOR_RIGHT_BACKWARD", "22"))
+        self._left_pwm_pin = int(ConfigLoader.get("MOTOR_LEFT_PWM", "19"))
+        self._right_pwm_pin = int(ConfigLoader.get("MOTOR_RIGHT_PWM", "26"))
+        
+        print(f"[MotorPlugin] 引脚配置: left_forward={self._left_forward_pin}, left_backward={self._left_backward_pin}, right_forward={self._right_forward_pin}, right_backward={self._right_backward_pin}, left_pwm={self._left_pwm_pin}, right_pwm={self._right_pwm_pin}")
+        
+        # GPIO设备
+        self._left_forward = None
+        self._left_backward = None
+        self._right_forward = None
+        self._right_backward = None
+        self._left_pwm = None
+        self._right_pwm = None
+        
+        # 当前运动状态
+        self._current_action = "stop"
+        
+        # 模拟模式下的状态
+        self._simulated_action = "stop"
+        self._simulated_speed = self._speed
+
+    def on_load(self) -> None:
+        """初始化电机控制"""
+        print(f"[MotorPlugin] gpiozero可用: {self._available}")
+        
+        if self._available:
+            try:
+                # 初始化数字输出设备
+                self._left_forward = DigitalOutputDevice(self._left_forward_pin)
+                self._left_backward = DigitalOutputDevice(self._left_backward_pin)
+                self._right_forward = DigitalOutputDevice(self._right_forward_pin)
+                self._right_backward = DigitalOutputDevice(self._right_backward_pin)
+                
+                # 初始化 PWM 设备
+                self._left_pwm = PWMOutputDevice(self._left_pwm_pin, initial_value=0)
+                self._right_pwm = PWMOutputDevice(self._right_pwm_pin, initial_value=0)
+                
+                # 确保电机停止
+                self._stop_motors()
+                print("[MotorPlugin] 电机控制初始化成功")
+            except Exception as e:
+                print(f"[MotorPlugin] GPIO初始化失败: {e}")
+                print("[MotorPlugin] 可能原因: 非树莓派硬件环境, 需要root权限, 或GPIO未启用")
+                print("[MotorPlugin] 切换到模拟模式运行")
+                self._available = False
+                # 清理已初始化的设备
+                self._cleanup_devices()
+        
+        if not self._available:
+            print("[MotorPlugin] 运行在模拟模式 - 所有电机命令将被记录但不会实际执行")
+
+    def _cleanup_devices(self):
+        """清理 GPIO 设备"""
+        devices = [
+            self._left_forward, 
+            self._left_backward, 
+            self._right_forward, 
+            self._right_backward,
+            self._left_pwm,
+            self._right_pwm
+        ]
+        for device in devices:
+            if device:
+                try:
+                    device.close()
+                except:
+                    pass
+
+    def on_unload(self) -> None:
+        """释放资源"""
+        self.stop()
+        self._cleanup_devices()
+        print("[MotorPlugin] 已卸载")
+
+    def start(self) -> None:
+        """启动电机控制"""
+        self._running = True
+        print("[MotorPlugin] 电机控制已启动")
+
+    def stop(self) -> None:
+        """停止电机控制"""
+        self._running = False
+        self._stop_motors()
+        print("[MotorPlugin] 电机控制已停止")
+
+    def _set_speed(self, speed: int) -> None:
+        """设置速度（内部方法）"""
+        old_speed = self._speed
+        self._speed = max(self._min_speed, min(self._max_speed, speed))
+        self._simulated_speed = self._speed
+        
+        if self._available and self._left_pwm and self._right_pwm:
+            # 将 0-100 转换为 0-1 的占空比
+            pwm_value = self._speed / 100.0
+            self._left_pwm.value = pwm_value
+            self._right_pwm.value = pwm_value
+        
+        print(f"[MotorPlugin] 速度: {old_speed}% -> {self._speed}%")
+
+    def _stop_motors(self) -> None:
+        """停止所有电机"""
+        self._current_action = "stop"
+        self._simulated_action = "stop"
+        
+        if self._available:
+            if self._left_forward:
+                self._left_forward.off()
+            if self._left_backward:
+                self._left_backward.off()
+            if self._right_forward:
+                self._right_forward.off()
+            if self._right_backward:
+                self._right_backward.off()
+            if self._left_pwm:
+                self._left_pwm.value = 0
+            if self._right_pwm:
+                self._right_pwm.value = 0
+
+    def _move_forward(self) -> None:
+        """前进"""
+        if not self._running:
+            return
+        
+        self._current_action = "forward"
+        self._simulated_action = "forward"
+        
+        current_speed = self._speed / 100.0
+        
+        if self._available:
+            self._left_forward.off()
+            self._left_backward.on()
+            self._left_pwm.value = current_speed
+            
+            self._right_forward.on()
+            self._right_backward.off()
+            self._right_pwm.value = current_speed
+        
+        print(f"[MotorPlugin] 前进 (速度: {self._speed}%)")
+
+    def _move_backward(self) -> None:
+        """后退"""
+        if not self._running:
+            return
+        
+        self._current_action = "backward"
+        self._simulated_action = "backward"
+        
+        current_speed = self._speed / 100.0
+        
+        if self._available:
+            self._left_forward.on()
+            self._left_backward.off()
+            self._left_pwm.value = current_speed
+            
+            self._right_forward.off()
+            self._right_backward.on()
+            self._right_pwm.value = current_speed
+        
+        print(f"[MotorPlugin] 后退 (速度: {self._speed}%)")
+
+    def _turn_left(self) -> None:
+        """左转"""
+        if not self._running:
+            return
+        
+        self._current_action = "left"
+        self._simulated_action = "left"
+        
+        current_speed = self._speed / 100.0
+        
+        if self._available:
+            self._left_forward.on()
+            self._left_backward.off()
+            self._left_pwm.value = current_speed * 0.8
+            
+            self._right_forward.on()
+            self._right_backward.off()
+            self._right_pwm.value = current_speed
+        
+        print(f"[MotorPlugin] 左转 (速度: {self._speed}%)")
+
+    def _turn_right(self) -> None:
+        """右转"""
+        if not self._running:
+            return
+        
+        self._current_action = "right"
+        self._simulated_action = "right"
+        
+        current_speed = self._speed / 100.0
+        
+        if self._available:
+            self._left_forward.off()
+            self._left_backward.on()
+            self._left_pwm.value = current_speed
+            
+            self._right_forward.off()
+            self._right_backward.on()
+            self._right_pwm.value = current_speed * 0.8
+        
+        print(f"[MotorPlugin] 右转 (速度: {self._speed}%)")
+
+    def get_speed(self) -> int:
+        """获取当前速度"""
+        return self._speed
+
+    def get_current_action(self) -> str:
+        """获取当前动作"""
+        return self._current_action
+
+    def execute(self, intent: str, params: Dict[str, Any]) -> Any:
+        # 如果插件未启动，先启动
+        if not self._running:
+            self.start()
+        
+        if intent == "MOTOR_FORWARD":
+            self._move_forward()
+            return {"status": "ok", "action": "forward", "speed": self._speed}
+        
+        elif intent == "MOTOR_BACKWARD":
+            self._move_backward()
+            return {"status": "ok", "action": "backward", "speed": self._speed}
+        
+        elif intent == "MOTOR_LEFT":
+            self._turn_left()
+            return {"status": "ok", "action": "left", "speed": self._speed}
+        
+        elif intent == "MOTOR_RIGHT":
+            self._turn_right()
+            return {"status": "ok", "action": "right", "speed": self._speed}
+        
+        elif intent == "MOTOR_STOP":
+            self._stop_motors()
+            return {"status": "ok", "action": "stop", "speed": self._speed}
+        
+        elif intent == "MOTOR_SPEED_UP":
+            self._set_speed(self._speed + self._speed_step)
+            return {"status": "ok", "speed": self._speed}
+        
+        elif intent == "MOTOR_SPEED_DOWN":
+            self._set_speed(self._speed - self._speed_step)
+            return {"status": "ok", "speed": self._speed}
+        
+        elif intent == "MOTOR_SET_SPEED":
+            speed = params.get('speed', 50)
+            self._set_speed(int(speed))
+            return {"status": "ok", "speed": self._speed}
+        
+        elif intent == "MOTOR_GET_STATUS":
+            return {
+                "status": "ok", 
+                "action": self._current_action, 
+                "speed": self._speed,
+                "available": self._available
+            }
+        
+        return {"status": "ignored"}
+
+    def get_supported_intents(self) -> list:
+        return [
+            "MOTOR_FORWARD", 
+            "MOTOR_BACKWARD", 
+            "MOTOR_LEFT", 
+            "MOTOR_RIGHT", 
+            "MOTOR_STOP",
+            "MOTOR_SPEED_UP",
+            "MOTOR_SPEED_DOWN",
+            "MOTOR_SET_SPEED",
+            "MOTOR_GET_STATUS"
+        ]
+    
+    def on_state_change(self, old_state: RobotState, new_state: RobotState) -> None:
+        """状态变化时处理"""
+        if old_state == RobotState.REMOTE and new_state != RobotState.REMOTE:
+            self._stop_motors()
+            print("[MotorPlugin] 退出远程控制，已停止电机")
+
+
+============================================================
+File: ./plugins/motor/__init__.py
+============================================================
+
+
+
+
+============================================================
+File: ./plugins/entertainment/__init__.py
+============================================================
+
+
+
+
+============================================================
+File: ./plugins/remote/plugin.py
+============================================================
+
+# src/plugins/remote/plugin.py
+import threading
+import json
+import os
+import hashlib
+import time
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Optional
+
+from src.core.base_plugin import BasePlugin
+from src.core.state import RobotState
+
+try:
+    from flask import Flask, render_template, jsonify, request, g, Response
+    from jose import JWTError, jwt
+    FLASK_AVAILABLE = True
+except ImportError:
+    FLASK_AVAILABLE = False
+    print("[RemotePlugin] flask 或 python-jose 未安装")
+
+
+# JWT 配置
+JWT_SECRET_KEY = "pi_robot_remote_control_secret_key_2026"
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_MINUTES = 60
+
+# 认证文件路径
+AUTH_FILE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'data', 'remote_auth.json')
+
+# HTML 页面已分离到 static/index.html
+
+
+class RemotePlugin(BasePlugin):
+    """远程控制插件 - Flask + HTTP API（简化版）"""
+    
+    def __init__(self, host: str = "0.0.0.0", port: int = 5000):
+        super().__init__("remote")
+        self.host = host
+        self.port = port
+        self._app = None
+        self._server_thread = None
+        self._running = False
+        self._available = FLASK_AVAILABLE
+        # 心跳相关
+        self._last_heartbeat_time = 0
+        self._heartbeat_check_thread = None
+        self._heartbeat_timeout = 10  # 心跳超时时间（秒）
+    
+    def _load_auth_data(self) -> Dict[str, Any]:
+        """加载认证文件"""
+        try:
+            with open(AUTH_FILE_PATH, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"[RemotePlugin] 加载认证文件失败: {e}")
+            return {}
+    
+    def _verify_password(self, plain_password: str, password_hash: str) -> bool:
+        """验证密码哈希（SHA256）"""
+        computed_hash = hashlib.sha256(plain_password.encode()).hexdigest()
+        return computed_hash == password_hash
+    
+    def _create_access_token(self, data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
+        """创建JWT token"""
+        to_encode = data.copy()
+        if expires_delta:
+            expire = datetime.now(timezone.utc) + expires_delta
+        else:
+            expire = datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES)
+        to_encode.update({"exp": expire})
+        encoded_jwt = jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+        return encoded_jwt
+    
+    def _verify_token(self, token: str) -> Optional[Dict[str, Any]]:
+        """验证JWT token"""
+        try:
+            payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+            username = payload.get("sub")
+            if username is None:
+                return None
+            return payload
+        except JWTError:
+            return None
+    
+    def on_load(self) -> None:
+        """加载插件，创建 Flask 应用"""
+        if not self._available:
+            print("[RemotePlugin] Flask 未安装，远程控制不可用")
+            return
+        
+        template_folder = os.path.join(os.path.dirname(__file__), 'static')
+        self._app = Flask(__name__, template_folder=template_folder)
+        self._setup_routes()
+        print(f"[RemotePlugin] Web 服务器已创建 (http://{self.host}:{self.port})")
+    
+    def _setup_routes(self) -> None:
+        """设置 Flask 路由"""
+        
+        @self._app.route('/')
+        def index():
+            return render_template('index.html')
+        
+        @self._app.route('/api/login', methods=['POST'])
+        def api_login():
+            """用户登录 - JWT认证"""
+            data = request.get_json()
+            username = data.get('username')
+            password = data.get('password')
+            
+            if not username or not password:
+                return jsonify({"error": "用户名或密码为空"}), 400
+            
+            auth_data = self._load_auth_data()
+            user = auth_data.get(username)
+            
+            if not user or not self._verify_password(password, user.get('password_hash', '')):
+                return jsonify({"error": "用户名或密码错误"}), 401
+            
+            access_token = self._create_access_token(data={"sub": username, "role": user.get('role')})
+            return jsonify({"access_token": access_token, "token_type": "bearer", "username": username})
+        
+        @self._app.route('/api/logout', methods=['POST'])
+        def api_logout():
+            """用户退出 - 断开远程控制并返回IDLE状态"""
+            if self._brain:
+                self._brain.remote_disconnect()
+            return jsonify({"status": "ok", "message": "已退出登录"})
+        
+        @self._app.route('/api/connect', methods=['POST'])
+        def api_connect():
+            """尝试进入远程控制状态（需要JWT认证）"""
+            # 验证JWT token
+            auth_header = request.headers.get('Authorization')
+            if not auth_header or not auth_header.startswith('Bearer '):
+                return jsonify({"error": "未授权访问"}), 401
+            
+            token = auth_header.split(' ')[1]
+            payload = self._verify_token(token)
+            if not payload:
+                return jsonify({"error": "无效或过期的token"}), 401
+            
+            if not self._brain:
+                return jsonify({"error": "Brain 未就绪"}), 500
+            
+            success = self._brain.remote_connect()
+            if success:
+                # 初始化心跳时间为当前时间，给前端缓冲时间发送第一个心跳
+                self._last_heartbeat_time = time.time()
+                return jsonify({"status": "ok", "state": self._brain.get_state()})
+            else:
+                return jsonify({"error": "机器人正在工作中，请稍后再试"}), 403
+        
+        @self._app.route('/api/disconnect', methods=['POST'])
+        def api_disconnect():
+            """断开远程控制（需要JWT认证）"""
+            auth_header = request.headers.get('Authorization')
+            if not auth_header or not auth_header.startswith('Bearer '):
+                return jsonify({"error": "未授权访问"}), 401
+            
+            token = auth_header.split(' ')[1]
+            payload = self._verify_token(token)
+            if not payload:
+                return jsonify({"error": "无效或过期的token"}), 401
+            
+            if self._brain:
+                self._brain.remote_disconnect()
+            return jsonify({"status": "ok"})
+        
+        @self._app.route('/api/state', methods=['GET'])
+        def api_state():
+            """获取当前状态（公开接口）"""
+            if not self._brain:
+                return jsonify({"state": "unknown"})
+            return jsonify({"state": self._brain.get_state()})
+        
+        @self._app.route('/api/command', methods=['POST'])
+        def api_command():
+            """执行命令（需要JWT认证）"""
+            # 验证JWT token
+            auth_header = request.headers.get('Authorization')
+            if not auth_header or not auth_header.startswith('Bearer '):
+                return jsonify({"error": "未授权访问"}), 401
+            
+            token = auth_header.split(' ')[1]
+            payload = self._verify_token(token)
+            if not payload:
+                return jsonify({"error": "无效或过期的token"}), 401
+            
+            if not self._brain:
+                return jsonify({"error": "Brain 未就绪"}), 500
+            
+            # 只有 REMOTE 状态才执行命令
+            if self._brain.get_state() != "remote":
+                return jsonify({"error": "非远程控制状态"}), 403
+            
+            data = request.get_json()
+            command = data.get('command', '')
+            params = data.get('params', {})
+            
+            print(f"[RemotePlugin] 收到命令: {command}, 参数: {params}")
+            
+            command_map = {
+                'forward': 'MOTOR_FORWARD',
+                'backward': 'MOTOR_BACKWARD',
+                'left': 'MOTOR_LEFT',
+                'right': 'MOTOR_RIGHT',
+                'stop': 'MOTOR_STOP',
+                'speed_up': 'MOTOR_SPEED_UP',
+                'speed_down': 'MOTOR_SPEED_DOWN',
+                'set_speed': 'MOTOR_SET_SPEED',
+            }
+            
+            if command in command_map:
+                intent = command_map[command]
+                print(f"[RemotePlugin] 意图: {intent}, 参数: {params}")
+                print(f"[RemotePlugin] self._brain: {self._brain}")
+                print(f"[RemotePlugin] Brain插件列表: {list(self._brain.plugins.keys()) if self._brain else 'None'}")
+                result = self._brain._route_intent(intent, params)
+                print(f"[RemotePlugin] 路由结果: {result}")
+                if result and result.get('status') == 'ok':
+                    return jsonify(result)
+                else:
+                    return jsonify({"status": "error", "message": "命令执行失败"})
+            else:
+                return jsonify({"status": "error", "message": f"未知命令: {command}"})
+        
+        @self._app.route('/api/heartbeat', methods=['POST'])
+        def api_heartbeat():
+            """心跳接口（需要JWT认证）"""
+            auth_header = request.headers.get('Authorization')
+            if not auth_header or not auth_header.startswith('Bearer '):
+                return jsonify({"error": "未授权访问"}), 401
+            
+            token = auth_header.split(' ')[1]
+            payload = self._verify_token(token)
+            if not payload:
+                return jsonify({"error": "无效或过期的token"}), 401
+            
+            # 更新最后心跳时间
+            self._last_heartbeat_time = time.time()
+            return jsonify({"status": "ok"})
+        
+        @self._app.route('/api/video_feed')
+        def api_video_feed():
+            """MJPEG视频流接口（需要JWT认证）"""
+            # 从URL参数或Authorization header获取token
+            token = request.args.get('token')
+            if not token:
+                auth_header = request.headers.get('Authorization')
+                if auth_header and auth_header.startswith('Bearer '):
+                    token = auth_header.split(' ')[1]
+            
+            if not token:
+                return jsonify({"error": "未授权访问"}), 401
+            
+            payload = self._verify_token(token)
+            if not payload:
+                return jsonify({"error": "无效或过期的token"}), 401
+            
+            def generate():
+                """生成MJPEG视频流（使用全局camera插件）"""
+                while self._running:
+                    # 获取全局camera插件
+                    camera = self._brain.get_plugin("camera") if self._brain else None
+                    
+                    if camera:
+                        frame = camera.get_frame()
+                        if frame:
+                            yield (b'--frame\r\n'
+                                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                    
+                    time.sleep(0.03)  # ~30fps
+            
+            return Response(
+                generate(),
+                mimetype='multipart/x-mixed-replace; boundary=frame'
+            )
+    
+    def _start_heartbeat_check(self) -> None:
+        """启动心跳检查线程"""
+        if self._heartbeat_check_thread and self._heartbeat_check_thread.is_alive():
+            return
+        
+        self._heartbeat_check_thread = threading.Thread(
+            target=self._heartbeat_check_loop,
+            daemon=True
+        )
+        self._heartbeat_check_thread.start()
+    
+    def _heartbeat_check_loop(self) -> None:
+        """心跳检查循环"""
+        while self._running:
+            try:
+                # 检查心跳超时（仅在REMOTE状态下）
+                if self._brain and self._brain.get_state() == "remote":
+                    current_time = time.time()
+                    if current_time - self._last_heartbeat_time > self._heartbeat_timeout:
+                        print(f"[RemotePlugin] 心跳超时，自动断开远程控制")
+                        self._brain.remote_disconnect()
+                time.sleep(5)  # 每5秒检查一次
+            except Exception as e:
+                print(f"[RemotePlugin] 心跳检查异常: {e}")
+                time.sleep(5)
+    
+    def on_unload(self) -> None:
+        """卸载插件"""
+        self.stop()
+        print("[RemotePlugin] 已卸载")
+    
+    def start(self) -> None:
+        """启动 Web 服务器"""
+        if not self._available or self._running:
+            return
+        
+        self._running = True
+        self._server_thread = threading.Thread(
+            target=self._run_server,
+            daemon=True
+        )
+        self._server_thread.start()
+        # 启动心跳检查线程
+        self._start_heartbeat_check()
+        print(f"[RemotePlugin] Web 服务器已启动: http://{self.host}:{self.port}")
+    
+    def stop(self) -> None:
+        """停止 Web 服务器"""
+        self._running = False
+        
+        # 停止 Flask 服务器
+        if hasattr(self, '_server') and self._server:
+            try:
+                self._server.shutdown()
+                print("[RemotePlugin] Flask 服务器已关闭")
+            except Exception as e:
+                print(f"[RemotePlugin] 关闭服务器失败: {e}")
+        
+        # 等待服务器线程结束
+        if self._server_thread and self._server_thread.is_alive():
+            self._server_thread.join(timeout=2)
+            print("[RemotePlugin] 服务器线程已退出")
+        
+        print("[RemotePlugin] Web 服务器已停止")
+    
+    def _run_server(self) -> None:
+        """运行 Flask 服务器（多线程模式）"""
+        try:
+            from werkzeug.serving import make_server
+            # 使用多线程模式，避免视频流阻塞其他请求
+            self._server = make_server(self.host, self.port, self._app, threaded=True)
+            self._server.serve_forever()
+        except Exception as e:
+            print(f"[RemotePlugin] 服务器异常: {e}")
+    
+    def execute(self, intent: str, params: Dict[str, Any]) -> Any:
+        if intent == "REMOTE_START":
+            self.start()
+            return {"status": "ok"}
+        elif intent == "REMOTE_STOP":
+            self.stop()
+            return {"status": "ok"}
+        return {"status": "ignored"}
+    
+    def get_supported_intents(self) -> list:
+        return ["REMOTE_START", "REMOTE_STOP"]
+    
+    def on_state_change(self, old_state: RobotState, new_state: RobotState) -> None:
+        """状态变化时通知前端（由前端轮询，无需处理）"""
+        pass
+
+
+
+============================================================
+File: ./plugins/remote/__init__.py
+============================================================
+
+
+
+
+============================================================
+File: ./common/config_loader.py
+============================================================
+
+import os
+from dotenv import load_dotenv
+
+class ConfigLoader:
+    """配置加载器 - 从 .env 文件读取配置"""
+    
+    _loaded = False
+    
+    @classmethod
+    def _load(cls):
+        """加载 .env 文件"""
+        if not cls._loaded:
+            env_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env')
+            if os.path.exists(env_path):
+                load_dotenv(env_path)
+                print("[ConfigLoader] 配置已加载")
+            else:
+                print("[ConfigLoader] .env 文件未找到")
+            cls._loaded = True
+    
+    @classmethod
+    def get(cls, key: str, default: str = '') -> str:
+        """获取配置值"""
+        cls._load()
+        return os.getenv(key, default)
+

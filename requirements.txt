@@ -1,0 +1,60 @@
+# Web 服务
+flask>=3.0.0
+flask-socketio>=5.3.6
+eventlet>=0.35.0
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+python-jose[cryptography]>=3.3.0
+python-multipart>=0.0.6
+websockets>=12.0
+aiofiles>=23.2.1
+opencv-python # 视频处理
+PyJWT # JWT 认证库
+
+# 硬件控制
+RPi.GPIO>=0.7.1
+pigpio>=1.78
+gpiozero
+lgpio 
+
+# 摄像头
+picamera2>=0.3.19
+
+# 语音输入输出
+sounddevice>=0.4.6
+soundfile>=0.12.1
+pyaudio>=0.2.13  # 音频录制支持
+faster-whisper>=1.0.1
+mutagen>=1.4.0 # 音频标签解析
+
+# 唤醒词
+sherpa-onnx>=1.10.0
+
+# AI 对话
+requests>=2.31.0
+python-dotenv>=1.0.0 # 环境变量加载
+openai>=1.0.0
+
+# 文字互转语音 (ASR/TTS) 库
+edge-tts # 文字转语音
+dashscope # 语音识别   
+
+# 播放器依赖
+pygame
+
+# 工具
+numpy>=1.24.0
+Pillow>=10.0.0
+python-dateutil>=2.8.2
+
+# 系统信息
+psutil>=5.9.0 
+
+# I2C 通信（微雪 UPS HAT 支持）
+smbus2>=0.4.2
+
+# Python 日志库
+loguru>=0.7.0
+
+ # 异步编程
+asyncio>=3.4.3
