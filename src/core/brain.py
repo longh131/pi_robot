@@ -230,14 +230,21 @@ class RobotBrain:
         logger.info("[Brain] 触发紧急停止")
         trigger_interrupt()
         self.cmd_queue.clear()
-        # 通知所有插件紧急停止
+        
+        motor_plugin = self.get_plugin("motor")
+        if motor_plugin:
+            motor_plugin.execute("MOTOR_STOP", {})
+        
+        ultrasonic_plugin = self.get_plugin("ultrasonic")
+        if ultrasonic_plugin:
+            ultrasonic_plugin.stop()
+        
         for plugin in self.plugins.values():
             try:
                 if hasattr(plugin, 'on_emergency_stop'):
                     plugin.on_emergency_stop()
             except Exception as e:
                 logger.error(f"[Brain] 插件 {plugin.name} 紧急停止回调异常: {e}")
-        # 短暂等待后重置打断状态
         time.sleep(0.1)
         reset_interrupt()
     
@@ -469,6 +476,7 @@ if __name__ == "__main__":
     from src.plugins.motor.plugin import MotorPlugin
     from src.plugins.ultrasonic.plugin import UltrasonicPlugin
     from src.plugins.system.plugin import SystemPlugin
+    from src.plugins.actions.plugin import ActionsPlugin
     
     brain = RobotBrain()
     
@@ -484,6 +492,7 @@ if __name__ == "__main__":
     brain.register_plugin("motor", MotorPlugin())
     brain.register_plugin("ultrasonic", UltrasonicPlugin())
     brain.register_plugin("system", SystemPlugin())
+    brain.register_plugin("actions", ActionsPlugin())
     
     # 设置 ASR-TTS 联动（ASR 可以打断 TTS）
     asr_plugin = brain.get_plugin("asr")
