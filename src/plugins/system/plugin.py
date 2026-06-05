@@ -18,10 +18,12 @@ class SystemPlugin(BasePlugin):
             return self._system_stop()
         elif intent == "SYSTEM_STATUS":
             return self._handle_status()
+        elif intent == "BATTERY_QUERY":
+            return self._handle_battery_query()
         return None
 
     def get_supported_intents(self) -> list:
-        return ["SYSTEM_VOLUME_UP", "SYSTEM_VOLUME_DOWN", "SYSTEM_STOP", "SYSTEM_STATUS"]
+        return ["SYSTEM_VOLUME_UP", "SYSTEM_VOLUME_DOWN", "SYSTEM_STOP", "SYSTEM_STATUS", "BATTERY_QUERY"]
 
     def _volume_up(self) -> str:
         try:
@@ -90,6 +92,41 @@ class SystemPlugin(BasePlugin):
         except Exception:
             return "未知"
 
+    def _get_battery_info(self):
+        try:
+            try:
+                import smbus2
+                with smbus2.SMBus(1) as bus:
+                    ADDR = 0x2d
+                    data = bus.read_i2c_block_data(ADDR, 0x20, 0x06)
+                    battery_percent = int(data[4] | data[5] << 8)
+                    battery_voltage = data[0] | data[1] << 8
+                    return f"{battery_percent}% ({battery_voltage}mV)"
+            except ImportError:
+                pass
+            except Exception:
+                pass
+            
+            result = subprocess.run(['upsc', 'battery'], capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                lines = result.stdout.split('\n')
+                for line in lines:
+                    if 'battery.charge:' in line:
+                        charge = line.split(':')[1].strip()
+                        return f"{charge}"
+            
+            try:
+                result = subprocess.run(['cat', '/sys/class/power_supply/BAT0/capacity'], 
+                                  capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    return f"{result.stdout.strip()}%"
+            except:
+                pass
+            
+            return "未知"
+        except Exception:
+            return "未知"
+
     def _handle_status(self) -> str:
         uptime = self._get_uptime()
         cpu_usage = self._get_cpu_usage()
@@ -97,4 +134,10 @@ class SystemPlugin(BasePlugin):
         
         message = f"我已经工作了{uptime}，大脑用了{cpu_usage}，内存使用{memory_usage}。"
         print(f"【系统状态】{message}")
+        return message
+
+    def _handle_battery_query(self) -> str:
+        battery = self._get_battery_info()
+        message = f"当前电量{self._get_battery_info()}。"
+        print(f"【电量查询】{message}")
         return message

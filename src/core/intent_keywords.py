@@ -7,7 +7,8 @@ SYSTEM_KEYWORDS = {
     "SYSTEM_VOLUME_UP": ["大声点", "音量加", "调高音量", "调大音量", "升高音量", "增大声音", "增加音量"],
     "SYSTEM_VOLUME_DOWN": ["小声点", "音量减", "调低音量", "调小音量", "降低音量", "减小声音", "减少音量"],
     "SYSTEM_STOP": ["停止一切活动", "停住", "不要废话了", "关闭一切", "别动", "停止一切", "停停停"],
-    "SYSTEM_STATUS": ["状态", "能量", "报告情况", "你怎么样", "身体怎么样了"]
+    "SYSTEM_STATUS": ["状态", "能量", "报告情况", "你怎么样", "身体怎么样了"],
+    "BATTERY_QUERY": ["电量", "还有多少电", "需要充电吗"]
 }
 
 # 电机控制
@@ -56,7 +57,7 @@ QUERY_KEYWORDS = {
 # LLM结构化输出意图枚举
 INTENT_ENUM = [
     # SYSTEM
-    "SYSTEM_VOLUME_UP", "SYSTEM_VOLUME_DOWN", "SYSTEM_STOP", "SYSTEM_STATUS",
+    "SYSTEM_VOLUME_UP", "SYSTEM_VOLUME_DOWN", "SYSTEM_STOP", "SYSTEM_STATUS", "BATTERY_QUERY",
     # MOTOR
     "MOVE_FORWARD", "MOVE_BACKWARD", "TURN_LEFT", "TURN_RIGHT", "STOP", "SPEED_UP", "SPEED_DOWN", "FOLLOW_ME", "DANCE",
     # ASSISTANT
@@ -80,7 +81,7 @@ KEYWORD_PRIORITY = [
 
 # 意图类型分类
 INTENT_CATEGORIES = {
-    "SYSTEM": ["SYSTEM_VOLUME_UP", "SYSTEM_VOLUME_DOWN", "SYSTEM_STOP", "SYSTEM_STATUS"],
+    "SYSTEM": ["SYSTEM_VOLUME_UP", "SYSTEM_VOLUME_DOWN", "SYSTEM_STOP", "SYSTEM_STATUS", "BATTERY_QUERY"],
     "MOTOR": ["MOVE_FORWARD", "MOVE_BACKWARD", "TURN_LEFT", "TURN_RIGHT", "STOP", "SPEED_UP", "SPEED_DOWN", "FOLLOW_ME", "DANCE"],
     "ASSISTANT": ["REMINDER_SET", "REMINDER_QUERY", "REMINDER_DELETE", "ALARM_SET", "TIMER_SET"],
     "ENTERTAINMENT": ["TAKE_PHOTO", "START_RECORDING", "STOP_RECORDING", "PLAY_MUSIC", "PAUSE_MUSIC", "STOP_MUSIC", "NEXT_SONG", "PREV_SONG", "RESUME_MUSIC"],
