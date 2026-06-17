@@ -119,6 +119,9 @@ class ActionsPlugin(BasePlugin):
         return "正在右转"
 
     def _handle_stop(self) -> str:
+        self._dance_active = False
+        self._follow_active = False
+        
         motor = self._get_motor_plugin()
         if motor:
             motor.execute("MOTOR_STOP", {})
@@ -190,6 +193,7 @@ class ActionsPlugin(BasePlugin):
             time.sleep(0.5)
 
     def _handle_follow(self) -> str:
+        # 未来优化方向：使用两轴云台扩大视野范围，配合人脸识别训练数据实现身份识别
         if self._follow_active:
             return "正在跟随中"
         

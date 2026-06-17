@@ -179,6 +179,11 @@ class RobotBrain:
         remote_plugin = self.get_plugin("remote")
         if remote_plugin:
             remote_plugin.start()
+        
+        # 自动启动动作插件（跳舞、跟随等）
+        actions_plugin = self.get_plugin("actions")
+        if actions_plugin:
+            actions_plugin.start()
     
     def stop(self) -> None:
         """停止大脑"""
@@ -434,11 +439,14 @@ class RobotBrain:
                             # TTS播报回复
                             self._speak(response_text)
                         
-                        # 尝试获取指令类型并执行（目前仅打印）
+                        # 获取指令类型并执行（使用LLM回复TTS，屏蔽本地默认播报）
                         command_type = self._get_command_type_for_intent(intent)
                         category = self.intent_handler.get_intent_category(intent)
                         print(f"[Brain]   类别: {category if category else 'LLM_INTENT'}")
                         print(f"[Brain]   指令类型: {command_type.name if command_type else 'UNKNOWN'}")
+                        
+                        # 提交指令执行（callback=None 避免本地TTS重复播报）
+                        self.submit_command(intent, params, command_type, callback=None)
                     else:
                         # 普通文本回复
                         print(f"[LLM] 回复: {parsed['content']}")
