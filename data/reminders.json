@@ -1,0 +1,25 @@
+[
+  {
+    "id": 1,
+    "content": "闹钟",
+    "time": "2026-06-18T14:42:00",
+    "status": "triggered",
+    "type": "alarm",
+    "created_at": "2026-06-18T14:40:34.386956"
+  },
+  {
+    "id": 2,
+    "content": "闹钟",
+    "time": "2026-06-18T14:59:00",
+    "status": "triggered",
+    "type": "alarm",
+    "created_at": "2026-06-18T14:58:13.330109"
+  },
+  {
+    "id": 3,
+    "content": "喝水",
+    "time": "2026-06-18T15:00:53.233582",
+    "status": "triggered",
+    "created_at": "2026-06-18T14:59:53.233582"
+  }
+]

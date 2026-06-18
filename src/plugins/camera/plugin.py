@@ -279,29 +279,29 @@ class CameraPlugin(BasePlugin):
     def execute(self, intent: str, params: Dict[str, Any]) -> Any:
         if intent == "CAMERA_START":
             self.start()
-            return {"status": "ok"}
+            return "摄像头已启动"
         elif intent == "CAMERA_STOP":
             self.stop()
-            return {"status": "ok"}
-        elif intent == "CAPTURE":
+            return "摄像头已停止"
+        elif intent == "CAPTURE" or intent == "TAKE_PHOTO":
             result = self.take_photo()
             if result.startswith("ok:"):
-                return {"status": "ok", "filename": result[3:]}
-            return {"status": "error", "message": result}
+                return "拍照成功，请去查看"
+            return f"拍照失败：{result}"
         elif intent == "START_RECORDING":
             success = self.start_recording()
-            return {"status": "ok" if success else "error"}
+            return "开始录像" if success else "录像启动失败"
         elif intent == "STOP_RECORDING":
             result = self.stop_recording()
             if result.startswith("ok:"):
-                return {"status": "ok", "filename": result[3:]}
-            return {"status": "error", "message": result}
+                return "录像已保存，请去查看"
+            return f"停止录像失败：{result}"
         elif intent == "IS_RECORDING":
-            return {"status": "ok", "recording": self.is_recording()}
-        return {"status": "ignored"}
+            return "正在录像" if self.is_recording() else "未在录像"
+        return "未识别的指令"
 
     def get_supported_intents(self) -> list:
-        return ["CAMERA_START", "CAMERA_STOP", "CAPTURE", "START_RECORDING", "STOP_RECORDING", "IS_RECORDING"]
+        return ["CAMERA_START", "CAMERA_STOP", "CAPTURE", "TAKE_PHOTO", "START_RECORDING", "STOP_RECORDING", "IS_RECORDING"]
     
     def on_state_change(self, old_state: RobotState, new_state: RobotState) -> None:
         """状态变化时处理"""

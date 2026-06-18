@@ -401,7 +401,7 @@ class RobotBrain:
             intent, params = self.intent_handler.match_intent(text)
             
             if intent != "NONE":
-                # 本地指令，直接执行（无TTS播报）
+                # 本地指令，直接执行（callback=None 避免本地TTS重复播报）
                 command_type = self._get_command_type_for_intent(intent)
                 category = self.intent_handler.get_intent_category(intent)
                 print(f"[Brain] ✓ 本地匹配成功")
@@ -409,7 +409,7 @@ class RobotBrain:
                 print(f"[Brain]   类别: {category}")
                 print(f"[Brain]   指令类型: {command_type.name}")
                 print(f"[Brain]   参数: {params}")
-                self.submit_command(intent, params, command_type)
+                self.submit_command(intent, params, command_type, callback=None)
             else:
                 # 未匹配到本地意图，走LLM处理
                 print(f"[Brain] ✗ 未匹配到本地意图，进入LLM处理")
@@ -485,6 +485,8 @@ if __name__ == "__main__":
     from src.plugins.ultrasonic.plugin import UltrasonicPlugin
     from src.plugins.system.plugin import SystemPlugin
     from src.plugins.actions.plugin import ActionsPlugin
+    from src.plugins.assistant.plugin import AssistantPlugin
+    from src.plugins.music.plugin import MusicPlugin
     
     brain = RobotBrain()
     
@@ -501,6 +503,8 @@ if __name__ == "__main__":
     brain.register_plugin("ultrasonic", UltrasonicPlugin())
     brain.register_plugin("system", SystemPlugin())
     brain.register_plugin("actions", ActionsPlugin())
+    brain.register_plugin("assistant", AssistantPlugin())
+    brain.register_plugin("music", MusicPlugin())
     
     # 设置 ASR-TTS 联动（ASR 可以打断 TTS）
     asr_plugin = brain.get_plugin("asr")
