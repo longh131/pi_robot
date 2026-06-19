@@ -51,8 +51,15 @@ class AssistantPlugin(BasePlugin):
             print(f"[AssistantPlugin] 保存提醒失败: {e}")
 
     def _set_reminder(self, params: Dict[str, Any]) -> str:
-        content = params.get('content', '') or params.get('event', '')
+        # 支持多种参数名
+        content = params.get('content', '') or params.get('message', '') or params.get('event', '')
         time_str = params.get('time', '')
+        
+        # 支持 duration + unit 格式
+        if not time_str and 'duration' in params:
+            duration = params['duration']
+            unit = params.get('unit', '秒')
+            time_str = f"{duration}{unit}"
         
         if not content:
             return "请告诉我提醒内容"

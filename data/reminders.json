@@ -45,5 +45,12 @@
     "status": "triggered",
     "type": "alarm",
     "created_at": "2026-06-19T12:35:18.912213"
+  },
+  {
+    "id": 7,
+    "content": "喝水",
+    "time": "2026-06-19T12:40:30.152556",
+    "status": "triggered",
+    "created_at": "2026-06-19T12:40:20.152556"
   }
 ]
