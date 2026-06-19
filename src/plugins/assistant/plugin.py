@@ -62,7 +62,10 @@ class AssistantPlugin(BasePlugin):
         try:
             now = datetime.now()
             
-            if '分钟' in time_str:
+            if '秒' in time_str:
+                seconds = int(time_str.replace('秒', '').strip())
+                reminder_time = now + timedelta(seconds=seconds)
+            elif '分钟' in time_str:
                 minutes = int(time_str.replace('分钟', '').strip())
                 reminder_time = now + timedelta(minutes=minutes)
             elif '小时' in time_str:

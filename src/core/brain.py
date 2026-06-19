@@ -259,6 +259,12 @@ class RobotBrain:
         if result:
             print(f"[Brain] 指令执行结果: {result}")
             self._speak(result)
+    
+    def _silent_command_callback(self, cmd):
+        """静默指令执行回调（不播报结果）"""
+        result = self._route_intent(cmd.intent, cmd.params)
+        if result:
+            print(f"[Brain] 指令执行结果: {result}")
 
     def submit_command(self, intent: str, params: Dict[str, Any],
                        command_type: CommandType = CommandType.QUEUED,
@@ -397,33 +403,68 @@ class RobotBrain:
                     self.sleep()
                     return
             
-            # 意图匹配：先本地关键词匹配，再LLM
+            # 意图匹配：混合模式
             intent, params = self.intent_handler.match_intent(text)
+            has_nickname = self.intent_handler.has_nickname(text)
             
             if intent != "NONE":
-                # 本地指令，直接执行（callback=None 避免本地TTS重复播报）
-                command_type = self._get_command_type_for_intent(intent)
-                category = self.intent_handler.get_intent_category(intent)
-                print(f"[Brain] ✓ 本地匹配成功")
-                print(f"[Brain]   意图: {intent}")
-                print(f"[Brain]   类别: {category}")
-                print(f"[Brain]   指令类型: {command_type.name}")
-                print(f"[Brain]   参数: {params}")
-                self.submit_command(intent, params, command_type, callback=None)
-            else:
-                # 未匹配到本地意图，走LLM处理
+                from src.core.intent_keywords import LOCAL_ONLY_INTENTS, LLM_ONLY_INTENTS
+                
+                if intent in LOCAL_ONLY_INTENTS:
+                    # 本地指令，直接执行
+                    command_type = self._get_command_type_for_intent(intent)
+                    category = self.intent_handler.get_intent_category(intent)
+                    print(f"[Brain] ✓ 本地匹配成功")
+                    print(f"[Brain]   意图: {intent}")
+                    print(f"[Brain]   类别: {category}")
+                    print(f"[Brain]   指令类型: {command_type.name}")
+                    print(f"[Brain]   参数: {params}")
+                    self.submit_command(intent, params, command_type, callback=self._default_command_callback)
+                elif intent in LLM_ONLY_INTENTS:
+                    # LLM_ONLY意图，交给LLM提取参数
+                    print(f"[Brain] ✓ 本地匹配到LLM意图: {intent}，交给LLM提取参数")
+                    llm_plugin = self.get_plugin("llm")
+                    if llm_plugin:
+                        import asyncio
+                        response = asyncio.run(llm_plugin.chat(text))
+                        
+                        parsed = llm_plugin.parse_intent_response(response)
+                        
+                        if parsed["type"] == "intent":
+                            intent = parsed["intent"]
+                            params = parsed["params"]
+                            response_text = parsed.get("response", "")
+                            
+                            print(f"[Brain] ✓ LLM提取参数完成")
+                            print(f"[Brain]   意图: {intent}")
+                            print(f"[Brain]   参数: {params}")
+                            
+                            if response_text:
+                                print(f"[LLM] 回复: {response_text}")
+                                self._speak(response_text)
+                            
+                            command_type = self._get_command_type_for_intent(intent)
+                            category = self.intent_handler.get_intent_category(intent)
+                            print(f"[Brain]   类别: {category if category else 'LLM_INTENT'}")
+                            print(f"[Brain]   指令类型: {command_type.name if command_type else 'UNKNOWN'}")
+                            
+                            self.submit_command(intent, params, command_type, callback=self._silent_command_callback)
+                        else:
+                            print(f"[LLM] 回复: {parsed['content']}")
+                            self._speak(parsed['content'])
+                    else:
+                        print("[Brain] LLM插件未注册")
+            elif has_nickname:
+                # 有昵称但未匹配到本地意图，走LLM处理
                 print(f"[Brain] ✗ 未匹配到本地意图，进入LLM处理")
-                # 调用LLM插件获取响应
                 llm_plugin = self.get_plugin("llm")
                 if llm_plugin:
                     import asyncio
                     response = asyncio.run(llm_plugin.chat(text))
                     
-                    # 解析LLM响应（支持结构化意图或普通文本）
                     parsed = llm_plugin.parse_intent_response(response)
                     
                     if parsed["type"] == "intent":
-                        # LLM识别到意图指令
                         intent = parsed["intent"]
                         params = parsed["params"]
                         response_text = parsed.get("response", "")
@@ -433,27 +474,108 @@ class RobotBrain:
                         print(f"[Brain]   参数: {params}")
                         print(f"[Brain]   执行指令...")
                         
-                        # 打印对话回复（如果有）
                         if response_text:
                             print(f"[LLM] 回复: {response_text}")
-                            # TTS播报回复
                             self._speak(response_text)
                         
-                        # 获取指令类型并执行（使用LLM回复TTS，屏蔽本地默认播报）
                         command_type = self._get_command_type_for_intent(intent)
                         category = self.intent_handler.get_intent_category(intent)
                         print(f"[Brain]   类别: {category if category else 'LLM_INTENT'}")
                         print(f"[Brain]   指令类型: {command_type.name if command_type else 'UNKNOWN'}")
                         
-                        # 提交指令执行（callback=None 避免本地TTS重复播报）
-                        self.submit_command(intent, params, command_type, callback=None)
+                        self.submit_command(intent, params, command_type, callback=lambda result: None)
                     else:
-                        # 普通文本回复
                         print(f"[LLM] 回复: {parsed['content']}")
-                        # TTS播报回复
                         self._speak(parsed['content'])
                 else:
                     print("[Brain] LLM插件未注册")
+            else:
+                # 无昵称，检查是否包含LLM_ONLY关键词
+                from src.core.intent_keywords import LLM_ONLY_INTENTS, ENTERTAINMENT_KEYWORDS
+                
+                should_llm = False
+                detected_intent = None
+                for keywords_dict in [ENTERTAINMENT_KEYWORDS]:
+                    for intent_key, keywords in keywords_dict.items():
+                        if intent_key in LLM_ONLY_INTENTS:
+                            for keyword in keywords:
+                                if keyword in text:
+                                    should_llm = True
+                                    detected_intent = intent_key
+                                    break
+                        if should_llm:
+                            break
+                    if should_llm:
+                        break
+                
+                if should_llm:
+                    # 包含LLM_ONLY关键词，交给LLM提取参数
+                    print(f"[Brain] ✓ 检测到LLM意图关键词: {detected_intent}，交给LLM提取参数")
+                    llm_plugin = self.get_plugin("llm")
+                    if llm_plugin:
+                        import asyncio
+                        response = asyncio.run(llm_plugin.chat(text))
+                        
+                        parsed = llm_plugin.parse_intent_response(response)
+                        
+                        if parsed["type"] == "intent":
+                            intent = parsed["intent"]
+                            params = parsed["params"]
+                            response_text = parsed.get("response", "")
+                            
+                            print(f"[Brain] ✓ LLM提取参数完成")
+                            print(f"[Brain]   意图: {intent}")
+                            print(f"[Brain]   参数: {params}")
+                            
+                            if response_text:
+                                print(f"[LLM] 回复: {response_text}")
+                                self._speak(response_text)
+                            
+                            command_type = self._get_command_type_for_intent(intent)
+                            category = self.intent_handler.get_intent_category(intent)
+                            print(f"[Brain]   类别: {category if category else 'LLM_INTENT'}")
+                            print(f"[Brain]   指令类型: {command_type.name if command_type else 'UNKNOWN'}")
+                            
+                            self.submit_command(intent, params, command_type, callback=self._silent_command_callback)
+                        else:
+                            print(f"[LLM] 回复: {parsed['content']}")
+                            self._speak(parsed['content'])
+                    else:
+                        print("[Brain] LLM插件未注册")
+                else:
+                    # 普通聊天，交给LLM回复
+                    print(f"[Brain] 普通聊天，交给LLM处理")
+                    llm_plugin = self.get_plugin("llm")
+                    if llm_plugin:
+                        import asyncio
+                        response = asyncio.run(llm_plugin.chat(text))
+                        parsed = llm_plugin.parse_intent_response(response)
+                        
+                        if parsed["type"] == "intent":
+                            intent = parsed["intent"]
+                            params = parsed["params"]
+                            response_text = parsed.get("response", "")
+                            
+                            print(f"[Brain] ✓ LLM识别到意图指令")
+                            print(f"[Brain]   意图: {intent}")
+                            print(f"[Brain]   参数: {params}")
+                            print(f"[Brain]   执行指令...")
+                            
+                            if response_text:
+                                print(f"[LLM] 回复: {response_text}")
+                                self._speak(response_text)
+                            
+                            command_type = self._get_command_type_for_intent(intent)
+                            category = self.intent_handler.get_intent_category(intent)
+                            print(f"[Brain]   类别: {category if category else 'LLM_INTENT'}")
+                            print(f"[Brain]   指令类型: {command_type.name if command_type else 'UNKNOWN'}")
+                            
+                            self.submit_command(intent, params, command_type, callback=self._silent_command_callback)
+                        else:
+                            print(f"[LLM] 回复: {parsed['content']}")
+                            self._speak(parsed['content'])
+                    else:
+                        print("[Brain] LLM插件未注册")
             
             # 重置超时计时器，等待下一次语音
             self._awake_start_time = time.time()
