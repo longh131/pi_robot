@@ -474,16 +474,20 @@ class RobotBrain:
                         print(f"[Brain]   参数: {params}")
                         print(f"[Brain]   执行指令...")
                         
-                        if response_text:
-                            print(f"[LLM] 回复: {response_text}")
-                            self._speak(response_text)
-                        
                         command_type = self._get_command_type_for_intent(intent)
                         category = self.intent_handler.get_intent_category(intent)
                         print(f"[Brain]   类别: {category if category else 'LLM_INTENT'}")
                         print(f"[Brain]   指令类型: {command_type.name if command_type else 'UNKNOWN'}")
                         
-                        self.submit_command(intent, params, command_type, callback=lambda result: None)
+                        # 如果是本地意图，不播报LLM回复，使用本地结果
+                        from src.core.intent_keywords import LOCAL_ONLY_INTENTS
+                        if intent in LOCAL_ONLY_INTENTS:
+                            self.submit_command(intent, params, command_type, callback=self._default_command_callback)
+                        else:
+                            if response_text:
+                                print(f"[LLM] 回复: {response_text}")
+                                self._speak(response_text)
+                            self.submit_command(intent, params, command_type, callback=lambda result: None)
                     else:
                         print(f"[LLM] 回复: {parsed['content']}")
                         self._speak(parsed['content'])
@@ -561,16 +565,20 @@ class RobotBrain:
                             print(f"[Brain]   参数: {params}")
                             print(f"[Brain]   执行指令...")
                             
-                            if response_text:
-                                print(f"[LLM] 回复: {response_text}")
-                                self._speak(response_text)
-                            
                             command_type = self._get_command_type_for_intent(intent)
                             category = self.intent_handler.get_intent_category(intent)
                             print(f"[Brain]   类别: {category if category else 'LLM_INTENT'}")
                             print(f"[Brain]   指令类型: {command_type.name if command_type else 'UNKNOWN'}")
                             
-                            self.submit_command(intent, params, command_type, callback=self._silent_command_callback)
+                            # 如果是本地意图，不播报LLM回复，使用本地结果
+                            from src.core.intent_keywords import LOCAL_ONLY_INTENTS
+                            if intent in LOCAL_ONLY_INTENTS:
+                                self.submit_command(intent, params, command_type, callback=self._default_command_callback)
+                            else:
+                                if response_text:
+                                    print(f"[LLM] 回复: {response_text}")
+                                    self._speak(response_text)
+                                self.submit_command(intent, params, command_type, callback=self._silent_command_callback)
                         else:
                             print(f"[LLM] 回复: {parsed['content']}")
                             self._speak(parsed['content'])
@@ -609,6 +617,7 @@ if __name__ == "__main__":
     from src.plugins.actions.plugin import ActionsPlugin
     from src.plugins.assistant.plugin import AssistantPlugin
     from src.plugins.music.plugin import MusicPlugin
+    from src.plugins.query.plugin import QueryPlugin
     
     brain = RobotBrain()
     
@@ -627,6 +636,7 @@ if __name__ == "__main__":
     brain.register_plugin("actions", ActionsPlugin())
     brain.register_plugin("assistant", AssistantPlugin())
     brain.register_plugin("music", MusicPlugin())
+    brain.register_plugin("query", QueryPlugin())
     
     # 设置 ASR-TTS 联动（ASR 可以打断 TTS）
     asr_plugin = brain.get_plugin("asr")
