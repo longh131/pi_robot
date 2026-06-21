@@ -38,6 +38,10 @@ class MusicPlugin(BasePlugin):
     def get_supported_intents(self) -> list:
         return ["PLAY_MUSIC", "PAUSE_MUSIC", "STOP_MUSIC", "NEXT_SONG", "PREV_SONG", "RESUME_MUSIC", "LIST_MUSIC"]
 
+    def on_state_change(self, old_state, new_state) -> None:
+        if new_state.value == "idle" and self._is_playing:
+            self._stop_music()
+
     def _init_pygame(self):
         if not self._pygame_initialized:
             try:
@@ -156,19 +160,27 @@ class MusicPlugin(BasePlugin):
         if not music_list:
             return "音乐目录为空"
         
+        if self._is_playing:
+            self._is_playing = False
+            self._stop_event.set()
+        
         self._current_index = random.randint(0, len(music_list) - 1)
         
         self._is_paused = False
+        self._is_playing = True
+        self._stop_event.clear()
         filepath = os.path.join(self._music_dir, music_list[self._current_index])
         
         try:
             import pygame
+            pygame.mixer.music.stop()
             pygame.mixer.music.load(filepath)
             pygame.mixer.music.play()
             
             return f"下一首: {music_list[self._current_index]}"
         except Exception as e:
             print(f"[MusicPlugin] 切歌失败: {e}")
+            self._is_playing = False
             return "切歌失败"
 
     def _prev_song(self) -> str:
@@ -176,22 +188,30 @@ class MusicPlugin(BasePlugin):
         if not music_list:
             return "音乐目录为空"
         
+        if self._is_playing:
+            self._is_playing = False
+            self._stop_event.set()
+        
         if self._current_index <= 0:
             self._current_index = len(music_list) - 1
         else:
             self._current_index -= 1
         
         self._is_paused = False
+        self._is_playing = True
+        self._stop_event.clear()
         filepath = os.path.join(self._music_dir, music_list[self._current_index])
         
         try:
             import pygame
+            pygame.mixer.music.stop()
             pygame.mixer.music.load(filepath)
             pygame.mixer.music.play()
             
             return f"上一首: {music_list[self._current_index]}"
         except Exception as e:
             print(f"[MusicPlugin] 切歌失败: {e}")
+            self._is_playing = False
             return "切歌失败"
 
     def _list_music(self) -> str:
